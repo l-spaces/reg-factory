@@ -1,0 +1,232 @@
+# -*- coding: utf-8 -*-
+"""
+run_full_flow.py — 端到端全流程编排（含邮箱注册）
+
+把项目原有的两个阶段串成一条龙，方便"跑一遍看看"：
+
+  Stage A  邮箱注册   outlook_reg_loop.py        -> 产出新 outlook 号写进 emails.txt
+  Stage B  平台注册   register_three_platforms   -> 用该号去 claude/chatgpt/grok 注册
+
+Stage A 本身是个常驻循环，这里把它当子进程拉起、盯着 emails.txt，**一旦冒出
+一个新的可用号就立刻杀掉循环**进入 Stage B，所以是"注册到一个邮箱就往下走"。
+
+前置：BitBrowser(54345) 在线、Clash Verge(控制器 9097 / 混合端口 7897) 在线。
+默认自动注入 HTTP(S)_PROXY 与 CLASH_API/SECRET/GROUP，让邮箱注册能换节点绕 MS 风控。
+
+用法：
+  python run_full_flow.py                          # 注册1个邮箱 -> 在 claude 上注册
+  python run_full_flow.py --platforms claude chatgpt
+  python run_full_flow.py --skip-email --email a@outlook.com --password xxx   # 跳过邮箱注册
+  python run_full_flow.py --email-attempts 20 --email-timeout 180
+  python run_full_flow.py --dry-run                # 只打印将要执行的命令
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+EMAILS_FILE = os.path.join(ROOT, "emails.txt")
+
+# 导入 config 以触发 .env 加载（CLASH_SECRET 等环境变量来自 .env / 真实环境）。
+try:
+    import config  # noqa: F401
+except Exception:
+    pass
+
+# 默认基建端点（密钥走环境变量，端点可被环境变量覆盖）。
+CLASH_API_DEFAULT = os.environ.get("CLASH_API", "http://127.0.0.1:9097")
+CLASH_SECRET_DEFAULT = os.environ.get("CLASH_SECRET", "")
+PROXY_DEFAULT = os.environ.get("CLASH_PROXY", "http://127.0.0.1:7897")
+
+
+def log(msg, level="INFO"):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] [{level}] {msg}", flush=True)
+
+
+# ---------------------------------------------------------------- emails.txt
+def read_fresh_emails():
+    """返回 emails.txt 里全部 (email, password) 条目（含已 reserve 的，纯快照用于 diff）。"""
+    out = []
+    if not os.path.isfile(EMAILS_FILE):
+        return out
+    with open(EMAILS_FILE, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("----")
+            out.append((parts[0].strip(), parts[1].strip() if len(parts) > 1 else ""))
+    return out
+
+
+# ---------------------------------------------------------------- env
+def build_child_env(args):
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    if args.proxy:
+        env["HTTP_PROXY"] = env["HTTPS_PROXY"] = args.proxy
+        env["http_proxy"] = env["https_proxy"] = args.proxy
+        # 关键：localhost API(BitBrowser 54345 / Clash 控制器 9097) 必须直连，
+        # 否则 urllib 把它们也塞进 7897 代理 -> 502 Bad Gateway。
+        no_proxy = "127.0.0.1,localhost,::1"
+        env["NO_PROXY"] = env["no_proxy"] = no_proxy
+    # 让 outlook_reg_loop 的 _clash_verge 能连控制器换节点
+    env.setdefault("CLASH_API", args.clash_api)
+    env.setdefault("CLASH_SECRET", args.clash_secret)
+    env.setdefault("CLASH_GROUP", args.clash_group)
+    return env
+
+
+# ---------------------------------------------------------------- Stage A
+def stage_email(args, env):
+    """拉起 outlook_reg_loop.py，盯 emails.txt，拿到一个新号就停。返回 (email, password) 或 None。"""
+    before = {e for e, _ in read_fresh_emails()}
+    log(f"Stage A 邮箱注册启动；emails.txt 现有 {len(before)} 个号", "A")
+
+    cmd = [
+        sys.executable, "outlook_reg_loop.py",
+        "--count", str(args.email_attempts),
+        "--timeout", str(args.email_timeout),
+        "--max-press", str(args.max_press),
+        "--sleep", "3",
+    ]
+    log(f"Stage A cmd: {' '.join(cmd)}", "A")
+    if args.dry_run:
+        return ("dry-run@outlook.com", "DryRunPass1!")
+
+    proc = subprocess.Popen(
+        cmd, cwd=ROOT, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace", bufsize=1,
+    )
+    new_email = None
+    try:
+        deadline = time.time() + args.email_total_timeout
+        # 边读子进程日志边透传，同时每读几行 poll 一次 emails.txt
+        assert proc.stdout is not None
+        last_check = 0.0
+        while True:
+            if proc.poll() is not None:
+                log("Stage A 子进程已退出", "A")
+                break
+            line = proc.stdout.readline()
+            if line:
+                print(f"  [outlook] {line}", end="", flush=True)
+            now = time.time()
+            if now - last_check >= 2:
+                last_check = now
+                cur = read_fresh_emails()
+                fresh = [(e, p) for e, p in cur if e not in before]
+                if fresh:
+                    new_email = fresh[-1]
+                    log(f"检测到新邮箱：{new_email[0]} —— 停止 Stage A 循环", "A")
+                    break
+            if now > deadline:
+                log(f"Stage A 总超时 {args.email_total_timeout}s 仍无新号", "A")
+                break
+            if not line:
+                time.sleep(0.2)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+    return new_email
+
+
+# ---------------------------------------------------------------- Stage B
+def stage_platforms(args, env, email, password):
+    log(f"Stage B 平台注册：{email}  platforms={','.join(args.platforms)}", "B")
+    cmd = [
+        sys.executable, "register_three_platforms.py",
+        "--email", email,
+        "--password", password or "",
+        "--token", "fresh",        # 占位：Graph token 失败 -> 回退浏览器/broker 取码
+        "--platforms", *args.platforms,
+        "--node", args.node,
+        "--timeout", str(args.platform_timeout),
+        "--broker", args.broker,
+    ]
+    if args.keep_on_fail:
+        cmd.append("--keep-on-fail")
+    log(f"Stage B cmd: {' '.join(cmd)}", "B")
+    if args.dry_run:
+        return 0
+    proc = subprocess.Popen(cmd, cwd=ROOT, env=env)
+    return proc.wait()
+
+
+# ---------------------------------------------------------------- main
+def main():
+    ap = argparse.ArgumentParser(description="端到端全流程（邮箱注册 + 平台注册）")
+    # Stage A
+    ap.add_argument("--skip-email", action="store_true", help="跳过邮箱注册，直接用 --email")
+    ap.add_argument("--email", default="", help="跳过邮箱注册时指定现成邮箱")
+    ap.add_argument("--password", default="", help="配合 --email")
+    ap.add_argument("--email-attempts", type=int, default=30, help="邮箱注册最多尝试次数")
+    ap.add_argument("--email-timeout", type=int, default=180, help="单次邮箱注册硬超时(s)")
+    ap.add_argument("--email-total-timeout", type=int, default=1800, help="Stage A 总超时(s)")
+    ap.add_argument("--max-press", default="3", help="人机验证按住次数上限")
+    # Stage B
+    ap.add_argument("--platforms", nargs="+", choices=["claude", "chatgpt", "grok"],
+                    default=["claude"], help="默认只跑 claude（最稳）；grok 已知死结")
+    ap.add_argument("--node", default="auto", help="claude/grok 走的 Clash 节点")
+    ap.add_argument("--platform-timeout", type=int, default=600)
+    ap.add_argument("--broker", default="", help="共享取码服务URL；默认空=各脚本自行开 Outlook 取码")
+    ap.add_argument("--keep-on-fail", action="store_true")
+    # 基建
+    ap.add_argument("--proxy", default=PROXY_DEFAULT, help="HTTP(S)_PROXY；传空串禁用")
+    ap.add_argument("--clash-api", default=CLASH_API_DEFAULT)
+    ap.add_argument("--clash-secret", default=CLASH_SECRET_DEFAULT)
+    ap.add_argument("--clash-group", default="GLOBAL",
+                    help="Clash 组名（proxy_switch 探节点用）；global 模式下出口由 GLOBAL 决定，"
+                         "传 'auto' 会 404。claude/grok 的节点选择模式见 --node")
+    ap.add_argument("--dry-run", action="store_true", help="只打印命令不执行")
+    args = ap.parse_args()
+
+    env = build_child_env(args)
+    t0 = time.time()
+    print("=" * 64)
+    log(f"全流程开始  proxy={args.proxy or 'OFF'}  clash={args.clash_api}")
+    print("=" * 64)
+
+    # Stage A
+    if args.skip_email:
+        if not args.email:
+            raise SystemExit("--skip-email 需要同时给 --email")
+        email, password = args.email.strip(), args.password.strip()
+        log(f"跳过邮箱注册，直接用 {email}", "A")
+    else:
+        got = stage_email(args, env)
+        if not got:
+            log("Stage A 没拿到可用邮箱，终止全流程", "ERR")
+            return 1
+        email, password = got
+        # emails.txt 里可能没记密码，用快照里的
+        password = password or args.password
+
+    # Stage B
+    print("=" * 64)
+    rc = stage_platforms(args, env, email, password)
+    print("=" * 64)
+    dt = time.time() - t0
+    log(f"全流程结束  email={email}  Stage B exit={rc}  用时 {dt:.0f}s",
+        "OK" if rc == 0 else "WARN")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

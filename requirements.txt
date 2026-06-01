@@ -1,0 +1,4 @@
+playwright
+requests
+aiohttp
+curl_cffi

@@ -1,0 +1,28 @@
+# 密钥
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行期数据 / PII（账号、cookie、日志、截图）
+cookies/**
+!cookies/.gitkeep
+!cookies/chatgpt/.gitkeep
+emails.txt
+emails_*.txt
+proxies.txt
+outlook_accounts/
+*_accounts/
+_outlook_pool/*.json
+tri_register_logs/*
+!tri_register_logs/.gitkeep
+screenshots/*
+!screenshots/.gitkeep
+screenshots_outlook/*
+!screenshots_outlook/.gitkeep
+*.log
+claude_node_usage.txt

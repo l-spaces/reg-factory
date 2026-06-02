@@ -17,8 +17,6 @@
 </p>
 
 <p>
-  <a href="https://tiantianai.86-53-110-54.sslip.io"><img src="https://img.shields.io/badge/%F0%9F%9A%80%20%E4%B8%80%E9%94%AE%E5%BC%80%E9%80%9A%E4%BC%9A%E5%91%98-Super%20Grok%20%C2%B7%20ChatGPT%20Plus%20%C2%B7%20Claude%20Max-FF5A5F?style=for-the-badge" alt="一键开通 Super Grok / ChatGPT Plus / Claude Max" /></a>
-  &nbsp;
   <img src="https://img.shields.io/badge/QQ%E7%BE%A4-1048143135-12B7F5?style=for-the-badge&logo=qq&logoColor=white" alt="QQ 交流群 1048143135" />
 </p>
 
@@ -38,9 +36,6 @@
 **ChatGPT / Grok / Claude** 上批量注册账号，并导出可直登的 cookie。底层用
 **比特浏览器(BitBrowser)** 做指纹隔离、**Clash Verge** 做节点切换绕区域封锁与 Cloudflare 风控、
 接码/打码平台过手机号与验证码。
-
-> 💎 **想直接用会员、不想折腾注册？** 👉 **<https://tiantianai.86-53-110-54.sslip.io>** 一键开通
-> **Super Grok / ChatGPT Plus / Claude Max** 正式会员。
 
 > ⚠️ 仅供学习与授权测试使用。所有密钥通过环境变量提供，仓库内不含任何明文凭据。
 
@@ -171,7 +166,6 @@ python _clash_verge.py ping                    # 控制面连通性
 ## 7. 交流 / 支持
 
 - 💬 **QQ 交流群：`1048143135`**（使用问题、避坑、更新通知）
-- 💎 **开通官方会员**：[Super Grok / ChatGPT Plus / Claude Max → https://tiantianai.86-53-110-54.sslip.io](https://tiantianai.86-53-110-54.sslip.io)
 
 ---
 

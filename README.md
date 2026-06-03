@@ -196,3 +196,15 @@ python _clash_verge.py ping                    # 控制面连通性
 ## 🔗 Friend Links
 
 - 🐧 [**LinuxDO**](https://linux.do) — A community for tech enthusiasts
+
+---
+
+## ☕ 赞赏
+
+<div align="center">
+
+<img src="assets/reward_qr.jpg" alt="赞赏码" width="280" />
+
+**谢谢老板打赏，您的打赏是我更新的动力！！！**
+
+</div>

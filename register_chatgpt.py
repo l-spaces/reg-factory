@@ -55,9 +55,18 @@ def rand_password():
     return "Aa1!" + "".join(random.choices(string.ascii_letters + string.digits, k=12))
 
 
+# 常见英文名/姓，短且自然（比随机字母串更像真人，键入也快）
+_FIRST_NAMES = ["James", "Mary", "John", "Anna", "David", "Laura", "Mike", "Emma",
+                "Chris", "Sara", "Paul", "Lucy", "Mark", "Nina", "Tom", "Kate",
+                "Alex", "Ella", "Sam", "Lily", "Ben", "Zoe", "Leo", "Ruby"]
+_LAST_NAMES = ["Smith", "Jones", "Brown", "Davis", "Evans", "Clark", "Hall", "Lee",
+               "Walker", "Young", "King", "Wright", "Green", "Baker", "Adams", "Carter",
+               "Reed", "Cook", "Bell", "Ward", "Gray", "Hughes", "Price", "Wood"]
+
+
 def rand_name():
-    first = "".join(random.choices(string.ascii_lowercase, k=6)).capitalize()
-    last = "".join(random.choices(string.ascii_lowercase, k=7)).capitalize()
+    first = random.choice(_FIRST_NAMES)
+    last = random.choice(_LAST_NAMES)
     return first, last
 
 
@@ -532,13 +541,47 @@ async def click_finish_button(page, index, age_sel, max_wait=12):
     return False
 
 
+async def dump_onboarding_fields(page, tag=""):
+    """dump onboarding 页的所有 input/select 结构，便于适配未知布局（age 页 / birthday 页）。"""
+    try:
+        print(f"  [onboarding-dump {tag}] url={page.url}")
+        n = await page.locator("input").count()
+        for i in range(min(n, 10)):
+            el = page.locator("input").nth(i)
+            try:
+                print(f"    input[{i}] type={await el.get_attribute('type')} "
+                      f"name={await el.get_attribute('name')} "
+                      f"placeholder={await el.get_attribute('placeholder')} "
+                      f"inputmode={await el.get_attribute('inputmode')} "
+                      f"aria-label={await el.get_attribute('aria-label')}")
+            except Exception:
+                pass
+        ns = await page.locator("select").count()
+        for i in range(min(ns, 6)):
+            el = page.locator("select").nth(i)
+            try:
+                print(f"    select[{i}] name={await el.get_attribute('name')} "
+                      f"aria-label={await el.get_attribute('aria-label')}")
+            except Exception:
+                pass
+        # combobox/listbox（自定义下拉，非原生 select）
+        nc = await page.get_by_role("combobox").count()
+        if nc:
+            print(f"    comboboxes: {nc}")
+    except Exception as e:
+        print(f"  [onboarding-dump] error: {e}")
+
+
 async def handle_onboarding(page, index, max_rounds=6):
-    """处理注册后的引导页：名字、生日、各种 Continue/Agree"""
+    """处理注册后的引导页：名字、生日/年龄、各种 Continue/Agree"""
     name_done = False  # about-you 名字只填一次，避免每轮重置成新随机名
+    bday_done = False
     for r in range(max_rounds):
         await asyncio.sleep(2)
         body = (await page.locator("body").inner_text()).lower()
         url = page.url.lower()
+        if r == 0:
+            await dump_onboarding_fields(page, tag=f"round{r}")  # 首轮 dump 结构，便于排查未知布局
 
         name_sel = 'input[name="name"], input[placeholder*="name" i], input[placeholder*="全名"], input[placeholder*="姓名"], input[autocomplete="name"]'
         age_sel = 'input[name="age"], input[type="number"], input[placeholder*="age" i], input[placeholder*="年齢"], input[placeholder*="年龄"]'
@@ -549,13 +592,13 @@ async def handle_onboarding(page, index, max_rounds=6):
         if on_about_you:
             if not name_done and await page.locator(name_sel).count() > 0:
                 first, last = rand_name()
-                # delay 调低：名字/年龄是 onboarding 的本地字段，不像邮箱要防风控，快点键入即可
-                if await react_fill(page, name_sel, f"{first} {last}", tries=2, delay=12, verbose=False):
+                # delay/settle 调低：名字/年龄是 onboarding 的本地字段，不像邮箱要防风控，快点键入即可
+                if await react_fill(page, name_sel, f"{first} {last}", tries=2, delay=12, settle=0.15, verbose=False):
                     print(f"  [onboarding] name: {first} {last}")
                     name_done = True
                     await blur_field(page, name_sel)
                     await asyncio.sleep(0.2)
-            if await react_fill(page, age_sel, str(random.randint(18, 40)), tries=2, delay=12, verbose=False):
+            if await react_fill(page, age_sel, str(random.randint(18, 40)), tries=2, delay=12, settle=0.15, verbose=False):
                 print("  [onboarding] age filled")
                 # 关键：失焦让 onBlur 校验跑起来，Finish 按钮才会解除 disabled
                 await blur_field(page, age_sel)
@@ -572,15 +615,57 @@ async def handle_onboarding(page, index, max_rounds=6):
                 print(f"  [onboarding] name: {first} {last}")
                 await asyncio.sleep(1)
 
-        # 生日（date 输入用原生 fill 即可，非 React 文本受控框）
-        bday = page.locator('input[name="birthday"], input[type="date"], input[placeholder*="birth" i], input[placeholder*="生日"], input[placeholder*="出生"]')
-        if await bday.count() > 0:
+        # 生日页：仅当存在**可见**生日输入框时才处理（另一种 onboarding 布局）。
+        # 注意 about-you 页有个 name=birthday 的 type=hidden 字段，是 OpenAI 前端按 age 自动算的，
+        # 绝不能碰 —— 故这里排除 hidden，用 :visible 限定，避免误填隐藏框导致卡死。
+        bday = page.locator(
+            'input[type="date"]:visible, '
+            'input[name="birthday"]:not([type="hidden"]):visible, '
+            'input[name="dob"]:visible, '
+            'input[placeholder*="birth" i]:visible, input[placeholder*="生日"]:visible, '
+            'input[placeholder*="出生"]:visible, '
+            'input[placeholder*="DD" i]:visible, input[placeholder*="MM" i]:visible, '
+            'input[placeholder*="YYYY" i]:visible')
+        if not bday_done and not on_about_you and await bday.count() > 0:
+            filled = False
+            # 1) 原生 date：fill ISO 即可
             try:
-                await bday.first.fill("1995-06-15")
-                print("  [onboarding] birthday filled")
-                await asyncio.sleep(1)
+                first_bday = bday.first
+                btype = await first_bday.get_attribute("type")
+                if btype == "date":
+                    await first_bday.fill("1995-06-15")
+                    filled = (await first_bday.input_value()).strip() != ""
             except Exception:
                 pass
+            # 2) React 受控文本/分段（MM/DD/YYYY 等）：逐个填
+            if not filled:
+                cnt = await bday.count()
+                if cnt >= 3:
+                    # 分段 month/day/year 三框：按 placeholder 判断填 06 / 15 / 1995
+                    for i in range(min(cnt, 3)):
+                        seg = bday.nth(i)
+                        ph = (await seg.get_attribute("placeholder") or "").lower()
+                        v = "1995" if ("y" in ph or "年" in ph) else ("15" if ("d" in ph or "日" in ph) else "06")
+                        try:
+                            await seg.click(timeout=4000)
+                            await seg.press("Control+A", timeout=2000)
+                            await seg.press("Delete", timeout=2000)
+                            await page.keyboard.type(v, delay=12)
+                        except Exception:
+                            pass
+                    filled = True
+                else:
+                    # 单框文本日期：试 ISO，再试 MM/DD/YYYY
+                    for v in ["1995-06-15", "06/15/1995"]:
+                        if await react_fill(page, 'input[type="date"]:visible, input[name="dob"]:visible',
+                                            v, tries=1, delay=12, settle=0.15, verbose=False):
+                            filled = True
+                            break
+            if filled:
+                print("  [onboarding] birthday filled")
+                bday_done = True
+                await blur_field(page, 'input[type="date"]:visible, input[name="dob"]:visible')
+                await asyncio.sleep(0.3)
 
         # 点完成/续行（多语言：中/繁/英/日）。具体"完成创建账号"按钮优先于泛化 Continue，
         # 否则 about-you 页只有 'Finish creating account' 这一个按钮会被泛化匹配漏掉。

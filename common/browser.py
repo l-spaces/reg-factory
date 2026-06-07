@@ -12,6 +12,7 @@ common/browser.py — BitBrowser 连接 + 反检测 stealth 注入（从 registe
 import asyncio
 import random
 import sys
+import time
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
@@ -224,7 +225,7 @@ async def human_type(page, selector, text, delay_range=(0.05, 0.18)):
     await asyncio.sleep(random.uniform(0.2, 0.5))
 
 
-async def react_fill(page, selector, text, tries=3, delay=55, verbose=True):
+async def react_fill(page, selector, text, tries=3, delay=55, verbose=True, settle=0.6):
     """填 React 受控输入，确保框架 state 真正更新。
 
     坑：page.fill()/locator.fill() 只写 DOM 的 .value，不触发 React 的合成
@@ -234,7 +235,10 @@ async def react_fill(page, selector, text, tries=3, delay=55, verbose=True):
     解法：
       1) 键盘逐字输入(page.keyboard.type) —— 触发真实 keydown/input 事件，React 收得到；
       2) 仍不一致则 JS 原生 setter + 派发 input/change 事件兜底；
-    每轮回读 input_value() 校验。返回是否成功写入。"""
+    每轮回读 input_value() 校验。返回是否成功写入。
+
+    settle: 键入后等 React 同步再回读的秒数。邮箱等关键字段用默认 0.6 求稳；
+            onboarding 本地字段可传小值（如 0.15）消除"输完名字停顿很久才输年龄"的卡顿。"""
     el = page.locator(selector).first
     try:
         if await el.count() == 0:
@@ -250,14 +254,17 @@ async def react_fill(page, selector, text, tries=3, delay=55, verbose=True):
 
     for i in range(tries):
         # 1) 键盘逐字输入（清空后真实键入，触发 React onChange）
+        # 给 click/press 设短 timeout：默认 actionability 超时是 30s，若字段被遮罩
+        # （如 name 框的 autocomplete 浮层盖住 age 框）会干等 30s。超时就跳过键入走 JS setter 兜底。
         try:
-            await el.click()
-            await el.press("Control+A")
-            await el.press("Delete")
+            await el.click(timeout=4000)
+            await el.press("Control+A", timeout=2000)
+            await el.press("Delete", timeout=2000)
             await page.keyboard.type(text, delay=delay)
-        except Exception:
-            pass
-        await asyncio.sleep(0.6)
+        except Exception as e:
+            if verbose:
+                print(f"  [react_fill] keyboard path skipped: {str(e)[:50]}")
+        await asyncio.sleep(settle)
         if await _readback() == text:
             return True
 
@@ -275,7 +282,7 @@ async def react_fill(page, selector, text, tries=3, delay=55, verbose=True):
                 }""", text)
         except Exception:
             pass
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(settle)
         if await _readback() == text:
             return True
 

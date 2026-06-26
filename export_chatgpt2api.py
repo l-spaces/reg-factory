@@ -104,7 +104,9 @@ def post_accounts(host, key, accounts):
 def import_accounts(host, key, accounts):
     """程序内调用的导入：POST {accounts:[...]} 到 <host>/api/accounts。
     与 post_accounts 不同——不抛异常、不打印，返回 (ok: bool, summary: str)，
-    供 register_chatgpt.py 注册成功后逐个上传时用（单号失败不应中断注册流程）。"""
+    供 register_chatgpt.py 注册成功后逐个上传时用（单号失败不应中断注册流程）。
+    出口代理偶发 TLS/连接抖动(Max retries exceeded)，对连接类异常退避重试几次(对齐 _sub2api_request)。"""
+    import time
     import requests
 
     if not (host and key):
@@ -112,15 +114,26 @@ def import_accounts(host, key, accounts):
     if not accounts:
         return False, "无 account 可导入"
     url = host.rstrip("/") + "/api/accounts"
-    try:
-        resp = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={"accounts": accounts},
-            timeout=120,
-        )
-    except Exception as e:
-        return False, f"请求失败: {str(e)[:100]}"
+    last_err = ""
+    for attempt in range(4):
+        try:
+            resp = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"accounts": accounts},
+                timeout=120,
+            )
+            break
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_err = str(e)[:100]
+            if attempt < 3:
+                wait = 2 + attempt * 2
+                print(f"  [c2a] 连接抖动重试 {attempt+1}/4（{wait}s 后）: {last_err[:60]}")
+                time.sleep(wait)
+                continue
+            return False, f"请求失败(重试用尽): {last_err}"
+        except Exception as e:
+            return False, f"请求失败: {str(e)[:100]}"
     if resp.status_code >= 400:
         return False, f"HTTP {resp.status_code}: {resp.text[:200]}"
     try:

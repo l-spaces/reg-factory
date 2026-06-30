@@ -97,25 +97,26 @@ function renderForm(s){
 
   s.args.forEach(a=>{
     const f = document.createElement('div'); f.className='field';
-    const label = a.flag.replace(/^--/,'');
+    const key = a.flag.replace(/^--/,'');
+    const label = a.label || key;
     if(a.type==='bool'){
       f.className='field checkbox';
-      f.innerHTML = `<input type="checkbox" id="f_${label}" ${a.default?'checked':''}>
-        <label for="f_${label}">${label}</label>`;
+      f.innerHTML = `<input type="checkbox" id="f_${key}" ${a.default?'checked':''}>
+        <label for="f_${key}">${label}</label>`;
       if(a.help){ const hh=document.createElement('div'); hh.className='fhelp'; hh.textContent=a.help; f.appendChild(hh); }
     }else if(a.type==='choice'){
       f.innerHTML = `<label>${label}</label>
-        <select id="f_${label}">${a.choices.map(c=>`<option ${c==a.default?'selected':''}>${c}</option>`).join('')}</select>
+        <select id="f_${key}">${a.choices.map(c=>`<option ${c==a.default?'selected':''}>${c}</option>`).join('')}</select>
         ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
     }else if(a.type==='multi'){
       const def = a.default||[];
       f.innerHTML = `<label>${label}</label>
-        <div class="multi">${a.choices.map(c=>`<label><input type="checkbox" value="${c}" ${def.includes(c)?'checked':''} data-multi="${label}">${c}</label>`).join('')}</div>
+        <div class="multi">${a.choices.map(c=>`<label><input type="checkbox" value="${c}" ${def.includes(c)?'checked':''} data-multi="${key}">${c}</label>`).join('')}</div>
         ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
     }else{
-      const t = a.type==='int' ? 'number' : 'text';
+      const t = a.secret ? 'password' : (a.type==='int' ? 'number' : 'text');
       f.innerHTML = `<label>${label}</label>
-        <input type="${t}" id="f_${label}" value="${a.default!==undefined&&a.default!==''?a.default:''}" placeholder="${a.help||''}">
+        <input type="${t}" id="f_${key}" value="${a.default!==undefined&&a.default!==''?a.default:''}" placeholder="${a.help||''}">
         ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
     }
     p.appendChild(f);
@@ -132,13 +133,13 @@ function renderForm(s){
 function collectArgs(s){
   const args = {};
   s.args.forEach(a=>{
-    const label = a.flag.replace(/^--/,'');
+    const key = a.flag.replace(/^--/,'');
     if(a.type==='bool'){
-      args[a.flag] = $(`#f_${label}`).checked;
+      args[a.flag] = $(`#f_${key}`).checked;
     }else if(a.type==='multi'){
-      args[a.flag] = $$(`input[data-multi="${label}"]:checked`).map(x=>x.value);
+      args[a.flag] = $$(`input[data-multi="${key}"]:checked`).map(x=>x.value);
     }else{
-      const v = $(`#f_${label}`).value.trim();
+      const v = $(`#f_${key}`).value.trim();
       if(v!=='') args[a.flag] = a.type==='int' ? parseInt(v,10) : v;
     }
   });

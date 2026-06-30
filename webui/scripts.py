@@ -156,6 +156,12 @@ SCRIPTS = [
             {"flag": "--max-press", "type": "str", "default": "3", "help": "人机验证按住次数上限"},
             {"flag": "--timeout", "type": "int", "default": 180, "help": "单号注册超时(秒)"},
             {"flag": "--sleep", "type": "int", "default": 5, "help": "每次注册间隔(秒)"},
+            {"flag": "--upload", "type": "bool", "default": False, "label": "上传",
+             "help": "邮箱创建成功后上传到 Outlook 邮箱管理服务"},
+            {"flag": "--outlook-email-url", "type": "str", "default": "", "label": "outlook邮箱url",
+             "help": "Outlook 邮箱服务地址；可填基础地址或 /api/external/outlook/upload 完整接口"},
+            {"flag": "--apikey", "type": "str", "default": "", "label": "apikey", "secret": True,
+             "help": "Outlook 邮箱服务对外 API Key"},
         ],
     },
     {

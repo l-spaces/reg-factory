@@ -26,7 +26,9 @@ import os
 import sys
 import time
 import importlib.util
+import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 from datetime import datetime
 
 if sys.platform == "win32":
@@ -279,6 +281,70 @@ def append_to_emails_pool(email, password):
         log(f"append_to_emails_pool failed: {type(e).__name__}: {e}", "WARN")
 
 
+def _build_outlook_upload_url(raw_url):
+    raw_url = (raw_url or "").strip()
+    if not raw_url:
+        return ""
+    if "://" not in raw_url:
+        raw_url = "http://" + raw_url
+    parsed = urlparse(raw_url)
+    if not parsed.scheme or not parsed.netloc:
+        return raw_url
+    path = (parsed.path or "").rstrip("/")
+    if path.endswith("/api/external/outlook/upload"):
+        return raw_url
+    return raw_url.rstrip("/") + "/api/external/outlook/upload"
+
+
+def upload_outlook_account(raw_url, api_key, email, password):
+    """Upload one newly-created Outlook account to outlookEmail external API."""
+    url = _build_outlook_upload_url(raw_url)
+    api_key = (api_key or "").strip()
+    if not url:
+        return False, "缺少 outlook邮箱url"
+    if not api_key:
+        return False, "缺少 apikey"
+    body = {
+        "email": email,
+        "password": password,
+        "remark": f"reg-factory self-loop {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+    }
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-API-Key": api_key,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            text = r.read(8192).decode("utf-8", "replace")
+            try:
+                payload = json.loads(text) if text else {}
+            except ValueError:
+                payload = {}
+            if 200 <= r.status < 300:
+                added = payload.get("added") if isinstance(payload, dict) else None
+                duplicate = payload.get("duplicate") if isinstance(payload, dict) else None
+                if added is not None or duplicate is not None:
+                    return True, f"added={added or 0}, duplicate={duplicate or 0}"
+                return True, "上传成功"
+            return False, f"HTTP {r.status}: {text[:200]}"
+    except urllib.error.HTTPError as e:
+        text = ""
+        try:
+            text = e.read(8192).decode("utf-8", "replace")
+        except Exception:
+            pass
+        return False, f"HTTP {e.code}: {text[:200] or e.reason}"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
 def write_record(record):
     os.makedirs(POOL_DIR, exist_ok=True)
     safe = record["email"].replace("@", "_at_").replace("/", "_")
@@ -408,6 +474,12 @@ def main():
                     help="seconds between attempts (after fail or success)")
     ap.add_argument("--sleep-when-full", type=int, default=60,
                     help="seconds to sleep when pool is at target")
+    ap.add_argument("--upload", action="store_true",
+                    help="upload each successful Outlook account to an external outlookEmail API")
+    ap.add_argument("--outlook-email-url", default="",
+                    help="outlookEmail base URL or full /api/external/outlook/upload endpoint")
+    ap.add_argument("--apikey", default="",
+                    help="API key for the outlookEmail external API")
     args = ap.parse_args()
 
     os.environ.setdefault("OUTLOOK_REG_MAX_PRESS", args.max_press)
@@ -432,6 +504,12 @@ def main():
     log(f"pool dir: {POOL_DIR}")
     os.makedirs(POOL_DIR, exist_ok=True)
     log(f"current pool size: {count_pool()}")
+    if args.upload:
+        upload_url = _build_outlook_upload_url(args.outlook_email_url)
+        if upload_url and args.apikey:
+            log(f"outlook upload enabled: {upload_url}")
+        else:
+            log("outlook upload enabled but url/apikey is missing; uploads will be skipped", "WARN")
 
     n = 0
     succ = 0
@@ -468,6 +546,10 @@ def main():
                 "ts": datetime.now().isoformat(),
             })
             append_to_emails_pool(email, password)   # 桥接进账号注册池
+            if args.upload:
+                ok, msg = upload_outlook_account(args.outlook_email_url, args.apikey, email, password)
+                log(f"outlook upload {'OK' if ok else 'FAILED'}: {email} ({msg})",
+                    "OK" if ok else "WARN")
             succ += 1
             log(f"OK in {elapsed:.1f}s: {email} -> {fname} (pool now {count_pool()})", "OK")
         else:

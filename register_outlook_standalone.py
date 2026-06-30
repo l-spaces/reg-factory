@@ -623,13 +623,22 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
         await asyncio.sleep(3)
         await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_start.png")
 
+        signup_email_selector = (
+            'input[type="email"], input[name="MemberName"], input[id="MemberName"], '
+            'input[id="usernameInput"], input[name="Username"]'
+        )
+
         # Handle privacy/consent pages (Chinese "个人数据导出许可", "同意并继续", etc.)
         for _consent_try in range(5):
             page_text = await page.evaluate("() => document.body.innerText")
             current_url = page.url.lower()
             # Check if on a consent/privacy page (not the actual signup form)
-            # Only trigger for actual privacy/consent standalone pages, not signup pages with footer links
-            is_signup_form = "signup.live.com" in current_url and "privacynotice" not in current_url
+            # Microsoft may serve consent on signup.live.com too, so use the actual
+            # email field presence instead of host name to avoid skipping consent.
+            is_signup_form = (
+                await page.locator(signup_email_selector).first.count() > 0
+                and "privacynotice" not in current_url
+            )
             if not is_signup_form and (
                 any(kw in page_text for kw in ["同意并继续", "个人数据", "数据导出"]) or \
                 any(kw in page_text.lower() for kw in [
@@ -686,10 +695,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
         # Step 1: Enter email
         email_ok = False
         for retry in range(5):
-            email_input = page.locator(
-                'input[type="email"], input[name="MemberName"], input[id="MemberName"], '
-                'input[id="usernameInput"], input[name="Username"]'
-            ).first
+            email_input = page.locator(signup_email_selector).first
             if await email_input.count() == 0:
                 print(f"  {tag} email input not found")
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_no_email.png")

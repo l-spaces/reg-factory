@@ -538,3 +538,81 @@ async def get_code_outlook_pw(
         await asyncio.sleep(poll)
     print("  [mail-pw] timeout, no code found")
     return None
+
+
+async def get_code_smart(
+    page,
+    email,
+    password,
+    refresh_token=None,
+    client_id=DEFAULT_CLIENT_ID,
+    sender_hint=("openai", "anthropic", "grok", "x.ai", "noreply", "no-reply", "github"),
+    subject_hint=("code", "verify", "verification", "launch code", "confirm", "验证"),
+    code_regex=r"\b(\d{6,8})\b",
+    max_wait=180,
+    poll=8,
+):
+    """智能选择取验证码方式：优先 Graph API，失败后降级到浏览器登录。
+
+    Args:
+        page: Playwright 页面对象（用于浏览器登录兜底）
+        email: 邮箱地址
+        password: 邮箱密码
+        refresh_token: Graph API 的 refresh_token（可选，有则优先用 API）
+        client_id: OAuth client_id（默认使用通用 client_id）
+        sender_hint: 发件人匹配关键词（元组）
+        subject_hint: 主题匹配关键词（元组）
+        code_regex: 验证码提取正则
+        max_wait: 最大等待时间（秒）
+        poll: 轮询间隔（秒）
+
+    Returns:
+        验证码字符串或 None
+    """
+    # 方案1：如果有 refresh_token，优先尝试 Graph API（快速、资源消耗小）
+    if refresh_token and refresh_token.strip():
+        print(f"  [mail-smart] trying Graph API first (token available)")
+        try:
+            # 同步函数需要在异步环境中通过 run_in_executor 调用
+            loop = asyncio.get_event_loop()
+            code = await loop.run_in_executor(
+                None,
+                get_code_by_token,
+                email,
+                refresh_token,
+                client_id,
+                sender_hint,      # ✅ 对应 sender_contains 参数
+                subject_hint,     # ✅ 对应 subject_contains 参数
+                code_regex,
+                max_wait,
+                poll,
+                None              # received_after
+            )
+
+            if code:
+                print(f"  [mail-smart] ✓ Graph API success: {code}")
+                return code
+            else:
+                print(f"  [mail-smart] ✗ Graph API returned None (timeout or token invalid)")
+        except Exception as e:
+            print(f"  [mail-smart] ✗ Graph API error: {str(e)[:80]}")
+    else:
+        print(f"  [mail-smart] no refresh_token, skipping Graph API")
+
+    # 方案2：降级到浏览器登录（更可靠但慢）
+    print(f"  [mail-smart] falling back to browser login")
+    code = await get_code_outlook_pw(
+        page, email, password,
+        sender_hint=sender_hint,     # ✅ 参数名匹配
+        subject_hint=subject_hint,   # ✅ 参数名匹配
+        code_regex=code_regex,
+        max_wait=max_wait,
+        poll=poll,
+    )
+
+    if code:
+        print(f"  [mail-smart] ✓ browser login success: {code}")
+    else:
+        print(f"  [mail-smart] ✗ browser login failed")
+
+    return code

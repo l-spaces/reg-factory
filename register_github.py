@@ -330,7 +330,7 @@ def rand_username():
 
 
 def load_pool_accounts():
-    """读 _outlook_pool/*.json -> [(email, password, cookies)]，最新优先。"""
+    """读 _outlook_pool/*.json -> [(email, password, cookies, refresh_token)]，最新优先。"""
     files = sorted(glob.glob(os.path.join(POOL_DIR, "*.json")), reverse=True)
     out = []
     for f in files:
@@ -339,7 +339,12 @@ def load_pool_accounts():
             email = d.get("email")
             pw = d.get("password")
             if email and pw:
-                out.append((email, pw, d.get("outlook_cookies")))
+                out.append((
+                    email,
+                    pw,
+                    d.get("outlook_cookies"),
+                    d.get("refresh_token")  # 新增：读取 refresh_token
+                ))
         except Exception:
             continue
     return out
@@ -378,6 +383,79 @@ async def dump_state(page, tag=""):
         print(f"  dump_state error: {e}")
 
 
+async def fill_launch_code(page, code):
+    """填写 GitHub launch code（支持单输入框和多输入框两种模式）。
+
+    GitHub 验证码页面可能是：
+      1. 单个输入框：直接填入完整验证码
+      2. 多个输入框：每个输入框填一位数字（如 launch-code-0 到 launch-code-7，共8位）
+    """
+    code = str(code).strip()
+    if not code or not code.isdigit():
+        print(f"  [code] invalid code format: {code}")
+        return False
+
+    try:
+        # 方案1：检测是否有多个独立输入框（GitHub 当前用的方式 - 8个输入框）
+        multi_inputs = await page.locator('input[name="launch_code[]"]').all()
+
+        if multi_inputs and len(multi_inputs) >= len(code):
+            # 多输入框模式：每个框填一位
+            print(f"  [code] detected {len(multi_inputs)} separate input boxes, filling {len(code)} digits")
+
+            for i, digit in enumerate(code):
+                if i >= len(multi_inputs):
+                    break
+                try:
+                    input_box = multi_inputs[i]
+                    await input_box.click()
+                    await input_box.fill(digit)
+                    await asyncio.sleep(0.3)
+                except Exception as e:
+                    print(f"  [code] error filling box {i}: {str(e)[:50]}")
+
+            print(f"  [code] filled {len(code)} digits into separate boxes")
+
+            # 等待一下让页面处理
+            await asyncio.sleep(2)
+
+            # 查找并点击 Continue 按钮
+            try:
+                continue_btn = page.get_by_role("button", name="Continue", exact=True).first
+                if await continue_btn.count() > 0:
+                    await continue_btn.click(timeout=5000)
+                    print("  [code] clicked 'Continue' button")
+                    await asyncio.sleep(3)
+            except Exception as e:
+                print(f"  [code] continue button error: {str(e)[:50]}")
+
+            return True
+
+        # 方案2：单输入框模式（备用）
+        single_selectors = [
+            'input[name="otp"]',
+            'input[autocomplete="one-time-code"]',
+            'input[inputmode="numeric"]',
+            'input[type="text"][maxlength]'
+        ]
+
+        for sel in single_selectors:
+            if await page.locator(sel).count() > 0:
+                print(f"  [code] detected single input box: {sel}")
+                ok = await react_fill(page, sel, code, tries=3)
+                if ok:
+                    print(f"  [code] filled code into single box")
+                    await asyncio.sleep(2)
+                    return True
+
+        print("  [code] no matching input found")
+        return False
+
+    except Exception as e:
+        print(f"  [code] fill error: {str(e)[:80]}")
+        return False
+
+
 async def detect_captcha(page, max_wait=20):
     """检测 Arkose FunCaptcha / octocaptcha 是否出现（轮询 page.frames）。
     实测：octocaptcha 是子 frame，主页面 body 文本不会变成 'verify your account'，
@@ -396,16 +474,112 @@ async def detect_captcha(page, max_wait=20):
     return False
 
 
-async def trigger_verify(page, max_clicks=4):
-    """点 Create account 触发验证。实测要点两下：第一下 priming，第二下才弹 octocaptcha。
-    每点一次等几秒看 octocaptcha frame 是否出现，出现即停。返回是否触发成功。"""
-    for attempt in range(max_clicks):
-        await click_create_account(page)
-        # 点完等 octocaptcha 子 frame 冒出来
-        if await detect_captcha(page, max_wait=8):
-            print(f"  [verify] octocaptcha triggered after {attempt+1} click(s)")
-            return True
+async def detect_launch_code_page(page):
+    """检测当前页面是否是 launch code / 验证码输入页"""
+    try:
+        # 方法1：检测 OTP/验证码输入框
+        code_input_selectors = [
+            'input[name="otp"]',
+            'input[autocomplete="one-time-code"]',
+            'input[inputmode="numeric"]',
+            'input[type="text"][maxlength="6"]',  # 6位数字输入框
+            'input[type="text"][maxlength="8"]',  # 8位数字输入框
+        ]
+        for sel in code_input_selectors:
+            if await page.locator(sel).count() > 0:
+                return True
+
+        # 方法2：页面文本特征
+        try:
+            body = (await page.locator("body").inner_text())[:600].lower()
+            # GitHub 验证页面的特征文本
+            launch_code_keywords = [
+                "launch code",
+                "verification code",
+                "we sent you",
+                "we just sent",
+                "enter the code",
+                "check your email",
+                "verify your account",
+                "enter your code"
+            ]
+            if any(keyword in body for keyword in launch_code_keywords):
+                return True
+        except Exception:
+            pass
+    except Exception:
+        pass
+
     return False
+
+
+async def trigger_verify(page, max_clicks=4):
+    """点 Create account 触发验证或直接跳转。
+    GitHub 可能有两种流程：
+      1. 弹出 Arkose 验证（返回 "CAPTCHA"）
+      2. 直接跳转到验证页面如 account_verifications（返回 "LAUNCHED"）
+    """
+    initial_url = page.url
+
+    for attempt in range(max_clicks):
+        clicked = await click_create_account(page)
+        if not clicked:
+            # 按钮点击失败（可能表单不合法）
+            continue
+
+        # 等待8秒，同时检测多种情况
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            # 检测1：Arkose 验证是否出现
+            try:
+                if any("octocaptcha" in (f.url or "") or "arkose" in (f.url or "") or "funcaptcha" in (f.url or "")
+                       for f in page.frames):
+                    print(f"  [verify] octocaptcha triggered after {attempt+1} click(s)")
+                    return "CAPTCHA"
+                if await page.locator("iframe[src*=octocaptcha], iframe[src*=arkose]").count() > 0:
+                    print(f"  [verify] octocaptcha iframe found after {attempt+1} click(s)")
+                    return "CAPTCHA"
+            except Exception:
+                pass
+
+            # 检测2：URL 是否变化（跳转到验证页面）
+            try:
+                current_url = page.url
+                if current_url != initial_url:
+                    print(f"  [verify] page navigated after {attempt+1} click(s): {current_url}")
+
+                    # GitHub 验证页面的 URL 模式
+                    if any(pattern in current_url for pattern in [
+                        "account_verifications",  # 主要验证页
+                        "check_email",            # 备用
+                        "sessions/verified"       # 备用
+                    ]):
+                        print(f"  [verify] -> detected verification page")
+                        return "LAUNCHED"
+
+                    # 检测页面上是否有验证码输入框
+                    if await detect_launch_code_page(page):
+                        print(f"  [verify] -> detected launch code input")
+                        return "LAUNCHED"
+
+                    # 其他页面
+                    print(f"  [verify] -> navigated to unknown page")
+                    return "NAVIGATED"
+            except Exception:
+                pass
+
+            # 检测3：即使 URL 没变，也检测输入框（SPA 可能不改 URL）
+            try:
+                if await detect_launch_code_page(page):
+                    print(f"  [verify] -> detected launch code input after {attempt+1} click(s)")
+                    return "LAUNCHED"
+            except Exception:
+                pass
+
+            await asyncio.sleep(0.5)
+
+    print(f"  [verify] no response after {max_clicks} clicks")
+    return None
 
 
 async def describe_captcha(page):
@@ -469,7 +643,8 @@ async def select_country(page, country="United States of America"):
 
 async def click_create_account(page):
     """提交注册：只认 'Create account'（绝不匹配顶部的 Continue with Google/Apple）。
-    按钮在三字段+国家合法前是 disabled，故等它可用再点。"""
+    按钮在三字段+国家合法前是 disabled，故等它可用再点。
+    返回 True 表示点击成功，False 表示超时/按钮不可用。"""
     deadline = time.time() + 15
     while time.time() < deadline:
         try:
@@ -481,15 +656,16 @@ async def click_create_account(page):
                 if disabled is None and aria != "true":
                     await b.click(timeout=6000)
                     print("  [form] clicked 'Create account'")
+                    await asyncio.sleep(2)  # 点击后等2秒让页面响应
                     return True
         except Exception:
             pass
         await asyncio.sleep(1)
-    print("  [form] 'Create account' 一直 disabled，可能某字段不合法")
+    print("  [form] 'Create account' 超时或一直 disabled，可能某字段不合法")
     return False
 
 
-async def register_one(email, password, cookies, p, auto=False, keep=True):
+async def register_one(email, password, cookies, p, refresh_token=None, auto=False, keep=True):
     start = time.time()
 
     def check_timeout():
@@ -568,17 +744,18 @@ async def register_one(email, password, cookies, p, auto=False, keep=True):
         print("  [3.5] settling for Arkose enforcement to init...")
         await asyncio.sleep(10)
 
-        # Step 4: 提交触发验证（实测要点两下：第一下 priming，第二下弹 octocaptcha）
+        # Step 4: 提交触发验证（可能直接跳转或弹出验证）
         print("  [4] click Create account -> trigger verify")
-        triggered = await trigger_verify(page)
+        verify_result = await trigger_verify(page)  # 返回 "CAPTCHA" / "LAUNCHED" / "NAVIGATED" / None
         await asyncio.sleep(3)
         await dump_state(page, "05_after_submit")
         check_timeout()
 
-        # Step 5: 验证 —— Arkose FunCaptcha
-        print("  [5] verification challenge")
-        has_captcha = triggered or await detect_captcha(page)
-        if has_captcha:
+        # Step 5: 根据结果分流处理
+        print("  [5] verification check")
+
+        if verify_result == "CAPTCHA":
+            # 情况1：出现 Arkose 验证
             print("  [!!!] Arkose 验证出现，启用视觉投票求解器")
             await dump_state(page, "06_CAPTCHA")
             if auto:
@@ -594,31 +771,69 @@ async def register_one(email, password, cookies, p, auto=False, keep=True):
                     await dump_state(page, "06b_after_solve")
                 else:
                     await dump_state(page, "06b_solve_failed")
+                    return None
             else:
                 print("  [explore] 停在验证步，窗口保留。")
                 return "CAPTCHA_REACHED"
-        else:
-            print("  [5] no captcha detected at this point")
-            await dump_state(page, "06_no_captcha")
 
+        elif verify_result == "LAUNCHED":
+            # 情况2：直接跳转到验证码输入页（account_verifications 等）
+            print("  [5] 直接跳转到验证码页，无需 Arkose 验证")
+            print(f"  [5] current page: {page.url}")
+            await dump_state(page, "06_no_captcha_direct_launch")
+
+            if not auto:
+                print("  [explore] --auto 未开，到此为止（保留窗口）。")
+                return "FORM_DONE"
+
+            # auto 模式：直接进入邮件验证码流程（跳到 Step 8）
+            print("  [5] proceeding to email verification code...")
+
+        elif verify_result == "NAVIGATED":
+            # 情况3：跳转到其他页面
+            print("  [5] 跳转到未知页面，检查状态")
+            print(f"  [5] current page: {page.url}")
+            await dump_state(page, "06_unknown_page")
+
+            # 尝试检测是否有验证码输入框
+            if await detect_launch_code_page(page):
+                print("  [5] 检测到验证码输入框，继续流程")
+                if not auto:
+                    return "FORM_DONE"
+            else:
+                print("  [5] 未知页面状态，可能出错")
+                return None
+
+        else:
+            # 情况4：提交失败或超时
+            print("  [5] 提交失败，按钮未响应或页面未变化")
+            await dump_state(page, "06_submit_failed")
+            return None
+
+        # 探索模式到此结束
         if not auto:
             print("  [explore] --auto 未开，到此为止（保留窗口）。")
             return "FORM_DONE"
 
-        # ===== auto 模式：验证后继续 =====
+        # ===== auto 模式：继续取邮件验证码 =====
         await asyncio.sleep(4)
-        await dump_state(page, "07_after_create")
+        await dump_state(page, "07_before_code")
         check_timeout()
 
-        # Step 8: 邮件 launch code（6~8 位）
-        print("  [8] waiting for GitHub launch code via Outlook browser login...")
+        # Step 8: 邮件 launch code（8位数字，GitHub 当前格式）
+        print("  [8] waiting for GitHub launch code (smart mode: Graph API → browser fallback)...")
         mail_page = await ctx.new_page()
         try:
-            code = await get_code_outlook_pw(
+            # 使用智能选择：优先 Graph API，失败后降级到浏览器登录
+            from common.mailbox import get_code_smart
+            code = await get_code_smart(
                 mail_page, email, password,
+                refresh_token=refresh_token,  # 传入 refresh_token（可能为 None）
                 sender_hint=("github", "noreply@github.com", "notifications"),
                 subject_hint=("launch code", "github", "verify", "code"),
-                code_regex=r"\b(\d{6,8})\b", max_wait=180, poll=8,
+                code_regex=r"\b(\d{6,8})\b",
+                max_wait=180,
+                poll=8,
             )
         finally:
             try:
@@ -629,8 +844,12 @@ async def register_one(email, password, cookies, p, auto=False, keep=True):
 
         if code:
             print(f"  got launch code: {code}")
-            code_sel = 'input[name="otp"], input[autocomplete="one-time-code"], input[inputmode="numeric"], input[type="text"]'
-            await react_fill(page, code_sel, code, tries=3)
+            # 使用新的填写函数，支持多输入框
+            fill_ok = await fill_launch_code(page, code)
+            if fill_ok:
+                print("  [8] launch code filled successfully")
+            else:
+                print("  [8] launch code fill failed, check page structure")
             await asyncio.sleep(4)
             await dump_state(page, "09_after_code")
         else:
@@ -676,14 +895,18 @@ async def main():
     REGISTER_TIMEOUT = args.timeout
 
     if args.email:
-        email, password, cookies = args.email, args.password or "", None
+        email, password, cookies, refresh_token = args.email, args.password or "", None, None
     else:
         accounts = load_pool_accounts()
         if not accounts:
             print(f"  没有可用邮箱：{POOL_DIR} 为空")
             return
-        email, password, cookies = random.choice(accounts)
+        email, password, cookies, refresh_token = random.choice(accounts)
         print(f"  从池中随机选中: {email} (池中共 {len(accounts)} 个)")
+        if refresh_token:
+            print(f"  ✓ refresh_token available (will use Graph API)")
+        else:
+            print(f"  ✗ no refresh_token (will use browser login)")
 
     print("=" * 56)
     print(f"  GitHub Auto Register  auto={args.auto} keep={not args.no_keep}")
@@ -697,11 +920,13 @@ async def main():
             print(f"\n----- 尝试 {attempt}/{max_attempts} -----")
             result = await register_one(
                 email, password, cookies, p,
+                refresh_token=refresh_token,  # 传递 refresh_token
                 auto=args.auto, keep=not args.no_keep,
             )
             if result != "SKIP_VARIANT":
                 break
             print(f"  难变体跳过，{2}s 后换新窗口重试...")
+            await asyncio.sleep(2)
             await asyncio.sleep(2)
     print(f"\n{'='*56}\n  result: {result}\n{'='*56}")
 

@@ -430,6 +430,42 @@ def api_accounts_detail(email: str):
     }
 
 
+@app.delete("/api/accounts/{email}")
+def api_accounts_delete(email: str):
+    """删除指定邮箱账号（级联删除 usages 和 cookies）"""
+    try:
+        _accounts_store().delete_email(email)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.patch("/api/accounts/{email}")
+async def api_accounts_update(email: str, request: Request):
+    """更新指定邮箱的 email 和/或 password 字段"""
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    new_email = (data or {}).get("new_email")
+    password = (data or {}).get("password")
+
+    try:
+        _accounts_store().update_email(email, new_email=new_email, password=password)
+        return {"ok": True}
+    except ValueError as e:
+        err_msg = str(e)
+        if "已存在" in err_msg:
+            return JSONResponse({"ok": False, "error": err_msg}, status_code=409)
+        elif "不存在" in err_msg:
+            return JSONResponse({"ok": False, "error": err_msg}, status_code=404)
+        else:
+            return JSONResponse({"ok": False, "error": err_msg}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 # ============================================================ sms-man 接码助手
 @app.post("/api/sms/rent")
 async def api_sms_rent(request: Request):

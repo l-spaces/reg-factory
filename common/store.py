@@ -276,6 +276,76 @@ class AccountStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # ---------------------------------------------------------------- 更新和删除
+    def delete_email(self, email):
+        """删除邮箱及其关联的 usages 和 cookies（级联删除）。
+        如果邮箱不存在，静默成功（幂等）。"""
+        email = email.strip().lower()
+        with self._lock:
+            # 查询 email_id
+            row = self._conn.execute(
+                "SELECT id FROM emails WHERE email=?", (email,)
+            ).fetchone()
+            if row is None:
+                return  # 邮箱不存在，幂等
+            email_id = row["id"]
+            # 先删除 usages 和 cookies（级联）
+            self._conn.execute("DELETE FROM usages WHERE email_id=?", (email_id,))
+            self._conn.execute("DELETE FROM cookies WHERE email_id=?", (email_id,))
+            # 再删除 emails
+            self._conn.execute("DELETE FROM emails WHERE id=?", (email_id,))
+            self._conn.commit()
+
+    def update_email(self, old_email, new_email=None, password=None):
+        """更新邮箱的 email 和/或 password 字段。
+
+        Args:
+            old_email: 原邮箱地址
+            new_email: 新邮箱地址（可选）
+            password: 新密码（可选）
+
+        Raises:
+            ValueError: 如果 old_email 不存在，或 new_email 已存在
+        """
+        old_email = old_email.strip().lower()
+        if new_email is not None:
+            new_email = new_email.strip().lower()
+
+        with self._lock:
+            # 查询 old_email 的 id
+            row = self._conn.execute(
+                "SELECT id FROM emails WHERE email=?", (old_email,)
+            ).fetchone()
+            if row is None:
+                raise ValueError("账号不存在")
+            email_id = row["id"]
+
+            # 如果要修改邮箱地址且与原地址不同，检查新地址是否已存在
+            if new_email is not None and new_email != old_email:
+                exists = self._conn.execute(
+                    "SELECT 1 FROM emails WHERE email=?", (new_email,)
+                ).fetchone()
+                if exists:
+                    raise ValueError("该邮箱地址已存在")
+
+            # 构建 UPDATE SQL（只更新非 None 的字段）
+            updates = []
+            params = []
+            if new_email is not None and new_email != old_email:
+                updates.append("email=?")
+                params.append(new_email)
+            if password is not None:
+                updates.append("password=?")
+                params.append(password)
+
+            if not updates:
+                return  # 没有需要更新的字段
+
+            sql = f"UPDATE emails SET {', '.join(updates)} WHERE id=?"
+            params.append(email_id)
+            self._conn.execute(sql, params)
+            self._conn.commit()
+
 
 # ---------------------------------------------------------------- 全局单例
 _SINGLETON = None

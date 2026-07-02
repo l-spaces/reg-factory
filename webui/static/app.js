@@ -458,12 +458,16 @@ function renderEmailsTable(page){
         <td class="truncate">${esc(cid)}</td>
         <td>${esc(a.source)}</td>
         <td class="dim">${esc((a.created_at||'').slice(0,10))}</td>
+        <td class="acc-actions">
+          <button class="btn-edit mini" data-email="${esc(a.email)}">编辑</button>
+          <button class="btn-delete mini" data-email="${esc(a.email)}">删除</button>
+        </td>
       </tr>`;
   }).join('');
 
   $('#acc-table').innerHTML = `
     <table class="tbl">
-      <thead><tr><th>邮箱</th><th>密码</th><th>Refresh Token</th><th>Client ID</th><th>来源</th><th>入库</th></tr></thead>
+      <thead><tr><th>邮箱</th><th>密码</th><th>Refresh Token</th><th>Client ID</th><th>来源</th><th>入库</th><th>操作</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -548,8 +552,9 @@ function renderCookiesTable(){
     </table>`;
 }
 
-// 事件委托：打码切换 + 行点击详情
+// 事件委托：打码切换 + 行点击详情 + 编辑/删除按钮
 $('#acc-table').addEventListener('click', e=>{
+  // 密码打码切换
   const tg = e.target.closest('.pw-toggle');
   if(tg){
     e.stopPropagation();
@@ -560,6 +565,27 @@ $('#acc-table').addEventListener('click', e=>{
     tg.textContent = show ? '隐藏' : '显示';
     return;
   }
+
+  // 删除按钮
+  const delBtn = e.target.closest('.btn-delete');
+  if(delBtn){
+    e.stopPropagation();
+    const email = delBtn.dataset.email;
+    if(!confirm(`确定要删除账号 ${email} 吗？此操作不可恢复。`)) return;
+    deleteAccount(email);
+    return;
+  }
+
+  // 编辑按钮
+  const editBtn = e.target.closest('.btn-edit');
+  if(editBtn){
+    e.stopPropagation();
+    const email = editBtn.dataset.email;
+    openEditModal(email);
+    return;
+  }
+
+  // 行点击详情
   const tr = e.target.closest('tr[data-email]');
   if(tr) openAccDetail(tr.dataset.email);
 });
@@ -590,6 +616,103 @@ $('#acc-q').addEventListener('input', ()=>{
   accQTimer = setTimeout(loadAccList, 250);
 });
 $('#btn-acc-refresh').onclick = loadAccounts;
+
+// ---------------------------------------------------------------- 删除账号
+async function deleteAccount(email){
+  try{
+    const r = await fetch('/api/accounts/'+encodeURIComponent(email), {method:'DELETE'});
+    const data = await r.json();
+    if(!r.ok || !data.ok){
+      alert('删除失败: '+(data.error||''));
+      return;
+    }
+    // 成功提示
+    const msg = $('#acc-count');
+    const old = msg.textContent;
+    msg.textContent = '✓ 已删除';
+    setTimeout(()=>msg.textContent=old, 2000);
+    // 刷新列表
+    await loadAccList();
+  }catch(e){
+    alert('删除请求失败: '+e);
+  }
+}
+
+// ---------------------------------------------------------------- 编辑账号
+function openEditModal(email){
+  // 查找当前账号数据
+  const acc = accState.allAccounts.find(a => a.email === email);
+  if(!acc) return;
+
+  // 预填数据
+  $('#edit-email').value = acc.email;
+  $('#edit-password').value = acc.password;
+  $('#edit-msg').textContent = '';
+
+  // 显示模态框
+  const modal = $('#edit-modal');
+  modal.style.display = 'flex';
+  modal.dataset.oldEmail = email; // 保存原邮箱用于 API 调用
+}
+
+// 关闭模态框
+$('#btn-edit-cancel').onclick = ()=> $('#edit-modal').style.display = 'none';
+$('#edit-modal').addEventListener('click', e=>{
+  if(e.target.id === 'edit-modal') $('#edit-modal').style.display = 'none';
+});
+
+// 提交编辑
+$('#btn-edit-confirm').onclick = async ()=>{
+  const modal = $('#edit-modal');
+  const oldEmail = modal.dataset.oldEmail;
+  const newEmail = $('#edit-email').value.trim();
+  const password = $('#edit-password').value.trim();
+
+  if(!newEmail || !password){
+    $('#edit-msg').textContent = '邮箱和密码不能为空';
+    return;
+  }
+
+  const body = {};
+  if(newEmail !== oldEmail) body.new_email = newEmail;
+  if(password) body.password = password;
+
+  try{
+    const btn = $('#btn-edit-confirm');
+    const oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '保存中…';
+
+    const r = await fetch('/api/accounts/'+encodeURIComponent(oldEmail), {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+
+    if(!r.ok || !data.ok){
+      $('#edit-msg').textContent = data.error || '更新失败';
+      btn.disabled = false;
+      btn.textContent = oldText;
+      return;
+    }
+
+    // 成功
+    modal.style.display = 'none';
+    const msg = $('#acc-count');
+    const oldMsg = msg.textContent;
+    msg.textContent = '✓ 已更新';
+    setTimeout(()=>msg.textContent=oldMsg, 2000);
+    await loadAccList();
+
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }catch(e){
+    $('#edit-msg').textContent = '请求失败: '+e;
+    $('#btn-edit-confirm').disabled = false;
+    $('#btn-edit-confirm').textContent = '确定';
+  }
+};
 
 // ---------------------------------------------------------------- 启动
 loadScripts();

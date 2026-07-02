@@ -23,13 +23,15 @@ setInterval(pollStatus, 5000);
 
 // ---------------------------------------------------------------- 视图切换
 function showView(v){
-  $('#view-run').style.display  = v==='run' ? 'flex' : 'none';
-  $('#view-env').style.display  = v==='env' ? 'block' : 'none';
-  $('#view-embed').style.display = v==='embed' ? 'block' : 'none';
-  $('#view-mailpool').style.display = v==='mailpool' ? 'block' : 'none';
+  $('#view-run').style.display      = v==='run'      ? 'flex'   : 'none';
+  $('#view-env').style.display      = v==='env'      ? 'block'  : 'none';
+  $('#view-embed').style.display    = v==='embed'    ? 'block'  : 'none';
+  $('#view-mailpool').style.display = v==='mailpool' ? 'block'  : 'none';
+  $('#view-accounts').style.display = v==='accounts' ? 'block'  : 'none';
   $$('.navbtn').forEach(b=>b.classList.toggle('active', b.dataset.view===v));
-  if(v==='env') loadEnv();
+  if(v==='env')      loadEnv();
   if(v==='mailpool') loadMailpool();
+  if(v==='accounts') loadAccounts();
 }
 $$('.navbtn').forEach(b=> b.onclick = ()=> showView(b.dataset.view));
 
@@ -370,6 +372,113 @@ $('#btn-import-mail').onclick = async ()=>{
   }catch(e){ msg.textContent='导入请求失败: '+e; }
   finally{ btn.disabled=false; btn.textContent=o; }
 };
+
+// ---------------------------------------------------------------- 账号中心
+const esc = s => String(s??'').replace(/[&<>"]/g, c=>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function loadAccounts(){ await Promise.all([loadAccStats(), loadAccList()]); }
+
+async function loadAccStats(){
+  try{
+    const s = await (await fetch('/api/accounts/stats')).json();
+    const box = $('#acc-stats');
+    box.innerHTML = `<div class="acc-card total">总邮箱 <b>${s.total_emails}</b></div>`;
+    const sel = $('#acc-platform');
+    const cur = sel.value;
+    const plats = Object.keys(s.platforms||{}).sort();
+    sel.innerHTML = '<option value="">全部平台</option>' +
+      plats.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
+    sel.value = cur;
+    plats.forEach(p=>{
+      const c = s.platforms[p];
+      box.insertAdjacentHTML('beforeend',
+        `<div class="acc-card">
+          <div class="acc-card-h">${esc(p)}</div>
+          <span class="b-ok">ok ${c.ok||0}</span>
+          <span class="b-rsv">rsv ${c.reserved||0}</span>
+          <span class="b-err">err ${c.error||0}</span>
+          <span class="b-free">free ${c.free||0}</span>
+        </div>`);
+    });
+  }catch(e){}
+}
+
+async function loadAccList(){
+  try{
+    const qs = new URLSearchParams();
+    const p=$('#acc-platform').value, st=$('#acc-status').value, q=$('#acc-q').value.trim();
+    if(p)  qs.set('platform', p);
+    if(st) qs.set('status',   st);
+    if(q)  qs.set('q',        q);
+    const d = await (await fetch('/api/accounts?'+qs.toString())).json();
+    $('#acc-count').textContent = `共 ${d.total} 个`;
+    const rows = (d.accounts||[]).map(a=>`
+      <tr data-email="${esc(a.email)}">
+        <td class="acc-em">${esc(a.email)}</td>
+        <td class="acc-pw">
+          <span class="pw-mask">••••••</span>
+          <span class="pw-real" hidden>${esc(a.password)}</span>
+          <button class="mini pw-toggle" type="button">显示</button>
+        </td>
+        <td>${esc(a.source)}</td>
+        <td class="dim">${esc((a.created_at||'').slice(0,10))}</td>
+      </tr>`).join('');
+    $('#acc-table').innerHTML = d.total
+      ? `<table class="tbl">
+          <thead><tr><th>邮箱</th><th>密码</th><th>来源</th><th>入库</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`
+      : '<p class="hint">无匹配账号</p>';
+  }catch(e){ $('#acc-table').innerHTML='<p class="hint">加载失败</p>'; }
+}
+
+// 事件委托：打码切换 + 行点击详情
+$('#acc-table').addEventListener('click', e=>{
+  const tg = e.target.closest('.pw-toggle');
+  if(tg){
+    e.stopPropagation();
+    const td = tg.closest('.acc-pw');
+    const m = td.querySelector('.pw-mask'), r = td.querySelector('.pw-real');
+    const show = r.hidden;
+    r.hidden = !show; m.hidden = show;
+    tg.textContent = show ? '隐藏' : '显示';
+    return;
+  }
+  const tr = e.target.closest('tr[data-email]');
+  if(tr) openAccDetail(tr.dataset.email);
+});
+
+async function openAccDetail(email){
+  try{
+    const d = await (await fetch('/api/accounts/'+encodeURIComponent(email))).json();
+    $('#acc-drawer-title').textContent = email;
+    const us = d.usages||[];
+    $('#acc-drawer-body').innerHTML = us.length
+      ? `<table class="tbl">
+          <thead><tr><th>平台</th><th>状态</th><th>原因</th><th>更新</th></tr></thead>
+          <tbody>${us.map(u=>`<tr>
+            <td>${esc(u.platform)}</td>
+            <td class="st-${esc(u.status)}">${esc(u.status)}</td>
+            <td class="dim">${esc(u.reason||'')}</td>
+            <td class="dim">${esc((u.updated_at||'').slice(0,19).replace('T',' '))}</td>
+          </tr>`).join('')}</tbody>
+        </table>`
+      : '<p class="hint">该邮箱暂无平台使用记录</p>';
+    $('#acc-drawer').style.display = 'block';
+  }catch(e){}
+}
+
+// 筛选 / 刷新 / 抽屉事件绑定
+['acc-platform','acc-status'].forEach(id=>
+  $('#'+id).addEventListener('change', loadAccList));
+let accQTimer = null;
+$('#acc-q').addEventListener('input', ()=>{
+  clearTimeout(accQTimer);
+  accQTimer = setTimeout(loadAccList, 250);
+});
+$('#btn-acc-refresh').onclick = loadAccounts;
+$('#acc-drawer-close').onclick = ()=> $('#acc-drawer').style.display='none';
 
 // ---------------------------------------------------------------- 启动
 loadScripts();

@@ -22,6 +22,7 @@
     <div class="nav-section">
       <button class="navbtn active" data-view="run">▶ 运行任务</button>
       <button class="navbtn" data-view="mailpool">📥 邮箱池</button>
+      <button class="navbtn" data-view="accounts">👤 账号中心</button>
       <button class="navbtn" data-view="env">⚙️ 配置 (.env)</button>
     </div>
     <div id="script-nav"></div>
@@ -85,6 +86,36 @@
           <span id="mailpool-msg" class="env-msg"></span>
         </div>
       </div>
+    </section>
+
+    <!-- 账号中心视图 -->
+    <section id="view-accounts" style="display:none">
+      <div class="panel">
+        <div class="env-head">
+          <h2>👤 账号中心</h2>
+          <button id="btn-acc-refresh" class="btn-run">刷新</button>
+        </div>
+        <div id="acc-stats" class="acc-stats"></div>
+        <div class="acc-filters">
+          <select id="acc-platform"><option value="">全部平台</option></select>
+          <select id="acc-status">
+            <option value="">全部状态</option>
+            <option value="reserved">reserved</option>
+            <option value="ok">ok</option>
+            <option value="error">error</option>
+          </select>
+          <input type="text" id="acc-q" placeholder="搜索邮箱…" spellcheck="false">
+          <span id="acc-count" class="env-msg"></span>
+        </div>
+        <div id="acc-table" class="acc-table"></div>
+      </div>
+      <aside id="acc-drawer" class="acc-drawer" style="display:none">
+        <div class="acc-drawer-head">
+          <span id="acc-drawer-title"></span>
+          <button id="acc-drawer-close" class="mini">关闭</button>
+        </div>
+        <div id="acc-drawer-body"></div>
+      </aside>
     </section>
 
     <!-- 配置视图 -->

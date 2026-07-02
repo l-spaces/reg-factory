@@ -371,7 +371,7 @@ def main():
                     email=r['email'],
                     password=r['password'],
                     refresh_token=r.get('refresh_token', ''),
-                    client_id=r.get('client_id', CLIENT_ID),
+                    client_id=CLIENT_ID,
                     source='extract_graph'
                 )
                 db_success += 1

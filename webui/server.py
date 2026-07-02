@@ -466,6 +466,71 @@ async def api_accounts_update(email: str, request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.post("/api/accounts")
+async def api_accounts_create(request: Request):
+    """Web UI 添加账号接口"""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "无效的请求数据"}, status_code=400)
+
+    email = (data or {}).get("email", "").strip()
+    password = (data or {}).get("password", "").strip()
+
+    # 验证
+    if not email or not password:
+        return JSONResponse({"ok": False, "error": "邮箱和密码不能为空"}, status_code=400)
+
+    if "@" not in email or "." not in email:
+        return JSONResponse({"ok": False, "error": "邮箱格式无效"}, status_code=400)
+
+    try:
+        _accounts_store().add_email(
+            email=email,
+            password=password,
+            refresh_token="",
+            client_id="",
+            source="user_add"
+        )
+        return {"ok": True, "email": email}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/external/accounts/add")
+async def api_external_accounts_add(request: Request):
+    """外部 API 添加账号接口"""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "无效的请求数据"}, status_code=400)
+
+    email = (data or {}).get("email", "").strip()
+    password = (data or {}).get("password", "").strip()
+    refresh_token = (data or {}).get("refresh_token", "").strip()
+    client_id = (data or {}).get("client_id", "").strip()
+    source = (data or {}).get("source", "external_api").strip()
+
+    # 验证
+    if not email or not password:
+        return JSONResponse({"ok": False, "error": "邮箱和密码不能为空"}, status_code=400)
+
+    if "@" not in email or "." not in email:
+        return JSONResponse({"ok": False, "error": "邮箱格式无效"}, status_code=400)
+
+    try:
+        _accounts_store().add_email(
+            email=email,
+            password=password,
+            refresh_token=refresh_token,
+            client_id=client_id,
+            source=source
+        )
+        return {"ok": True, "email": email}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 # ============================================================ sms-man 接码助手
 @app.post("/api/sms/rent")
 async def api_sms_rent(request: Request):

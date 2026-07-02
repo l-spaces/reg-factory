@@ -55,3 +55,8 @@ gmail_android/offline/bluestacks/*
 !gmail_android/offline/bluestacks/.gitkeep
 gmail_android/dist/
 screenshots_vision/
+
+# 运行时临时文件
+.test_job_id.txt
+.webui_pid.txt
+login_extension/

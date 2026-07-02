@@ -600,6 +600,7 @@ $('#acc-q').addEventListener('input', ()=>{
   accQTimer = setTimeout(loadAccList, 250);
 });
 $('#btn-acc-refresh').onclick = loadAccounts;
+$('#btn-acc-add').onclick = openAddModal;
 
 // ---------------------------------------------------------------- 删除账号
 async function deleteAccount(email){
@@ -636,7 +637,21 @@ function openEditModal(email){
   // 显示模态框
   const modal = $('#edit-modal');
   modal.style.display = 'flex';
+  modal.dataset.mode = 'edit';
   modal.dataset.oldEmail = email; // 保存原邮箱用于 API 调用
+  $('#edit-modal h3').textContent = '编辑账号';
+}
+
+// 打开添加账号模态框
+function openAddModal(){
+  $('#edit-email').value = '';
+  $('#edit-password').value = '';
+  $('#edit-msg').textContent = '';
+
+  const modal = $('#edit-modal');
+  modal.style.display = 'flex';
+  modal.dataset.mode = 'add';
+  $('#edit-modal h3').textContent = '添加账号';
 }
 
 // 关闭模态框
@@ -648,7 +663,7 @@ $('#edit-modal').addEventListener('click', e=>{
 // 提交编辑
 $('#btn-edit-confirm').onclick = async ()=>{
   const modal = $('#edit-modal');
-  const oldEmail = modal.dataset.oldEmail;
+  const mode = modal.dataset.mode || 'edit';
   const newEmail = $('#edit-email').value.trim();
   const password = $('#edit-password').value.trim();
 
@@ -657,44 +672,74 @@ $('#btn-edit-confirm').onclick = async ()=>{
     return;
   }
 
-  const body = {};
-  if(newEmail !== oldEmail) body.new_email = newEmail;
-  if(password) body.password = password;
+  const btn = $('#btn-edit-confirm');
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '保存中…';
 
   try{
-    const btn = $('#btn-edit-confirm');
-    const oldText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '保存中…';
+    let r, data;
 
-    const r = await fetch('/api/accounts/'+encodeURIComponent(oldEmail), {
-      method: 'PATCH',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
-    });
-    const data = await r.json();
+    if(mode === 'add'){
+      // 添加模式：POST /api/accounts
+      r = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email: newEmail, password})
+      });
+      data = await r.json();
 
-    if(!r.ok || !data.ok){
-      $('#edit-msg').textContent = data.error || '更新失败';
-      btn.disabled = false;
-      btn.textContent = oldText;
-      return;
+      if(!r.ok || !data.ok){
+        $('#edit-msg').textContent = data.error || '添加失败';
+        btn.disabled = false;
+        btn.textContent = oldText;
+        return;
+      }
+
+      // 成功
+      modal.style.display = 'none';
+      const msg = $('#acc-count');
+      const oldMsg = msg.textContent;
+      msg.textContent = '✓ 已添加';
+      setTimeout(()=>msg.textContent=oldMsg, 2000);
+      await loadAccList();
+
+    }else{
+      // 编辑模式：PATCH /api/accounts/{oldEmail}
+      const oldEmail = modal.dataset.oldEmail;
+      const body = {};
+      if(newEmail !== oldEmail) body.new_email = newEmail;
+      if(password) body.password = password;
+
+      r = await fetch('/api/accounts/'+encodeURIComponent(oldEmail), {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+      });
+      data = await r.json();
+
+      if(!r.ok || !data.ok){
+        $('#edit-msg').textContent = data.error || '更新失败';
+        btn.disabled = false;
+        btn.textContent = oldText;
+        return;
+      }
+
+      // 成功
+      modal.style.display = 'none';
+      const msg = $('#acc-count');
+      const oldMsg = msg.textContent;
+      msg.textContent = '✓ 已更新';
+      setTimeout(()=>msg.textContent=oldMsg, 2000);
+      await loadAccList();
     }
-
-    // 成功
-    modal.style.display = 'none';
-    const msg = $('#acc-count');
-    const oldMsg = msg.textContent;
-    msg.textContent = '✓ 已更新';
-    setTimeout(()=>msg.textContent=oldMsg, 2000);
-    await loadAccList();
 
     btn.disabled = false;
     btn.textContent = oldText;
   }catch(e){
     $('#edit-msg').textContent = '请求失败: '+e;
-    $('#btn-edit-confirm').disabled = false;
-    $('#btn-edit-confirm').textContent = '确定';
+    btn.disabled = false;
+    btn.textContent = oldText;
   }
 };
 

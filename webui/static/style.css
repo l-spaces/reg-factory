@@ -326,8 +326,8 @@ button,input,select,textarea{transition:background .15s,border-color .15s,color 
 }
 
 .modal-box {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
+  background: #ffffff;
+  border: 1px solid #ddd;
   border-radius: 8px;
   padding: 24px;
   width: 420px;
@@ -337,7 +337,7 @@ button,input,select,textarea{transition:background .15s,border-color .15s,color 
 
 .modal-box h3 {
   margin: 0 0 20px 0;
-  color: var(--fg-0);
+  color: #333;
   font-size: 18px;
 }
 
@@ -349,17 +349,17 @@ button,input,select,textarea{transition:background .15s,border-color .15s,color 
   display: block;
   margin-bottom: 6px;
   font-size: 14px;
-  color: var(--fg-1);
+  color: #555;
   font-weight: 500;
 }
 
 .modal-field input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid #ddd;
   border-radius: 4px;
-  background: var(--bg-0);
-  color: var(--fg-0);
+  background: #f9f9f9;
+  color: #333;
   font-size: 14px;
   font-family: inherit;
   box-sizing: border-box;
@@ -388,19 +388,20 @@ button,input,select,textarea{transition:background .15s,border-color .15s,color 
 }
 
 .btn-cancel {
-  background: var(--bg-2);
-  color: var(--fg-1);
-  border: 1px solid var(--border);
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
 }
 
 .btn-cancel:hover {
-  background: var(--bg-3);
+  background: #e8e8e8;
+  color: #333;
 }
 
 .modal-msg {
   margin-top: 12px;
   font-size: 13px;
-  color: var(--red);
+  color: #e74c3c;
   min-height: 18px;
 }
 

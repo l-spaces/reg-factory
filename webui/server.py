@@ -422,7 +422,12 @@ def api_accounts_stats():
 
 @app.get("/api/accounts/{email}")
 def api_accounts_detail(email: str):
-    return {"email": email, "usages": _accounts_store().email_usages(email)}
+    store = _accounts_store()
+    return {
+        "email": email,
+        "usages": store.email_usages(email),
+        "cookies": store.get_cookies_by_email(email)
+    }
 
 
 # ============================================================ sms-man 接码助手

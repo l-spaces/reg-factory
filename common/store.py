@@ -100,7 +100,8 @@ class AccountStore:
             return row["id"] if row else 0
 
     def list_emails(self, platform=None, status=None):
-        sql = ("SELECT e.id, e.email, e.password, e.source, e.created_at "
+        sql = ("SELECT e.id, e.email, e.password, e.refresh_token, e.client_id, "
+               "e.source, e.created_at "
                "FROM emails e")
         params = []
         if platform or status:
@@ -258,6 +259,22 @@ class AccountStore:
                     (platform, eid),
                 ).fetchone()
         return r["payload"] if r else None
+
+    def get_cookies_by_email(self, email):
+        """查询该邮箱的所有 cookies。返回 [{platform, payload, updated_at}, ...]"""
+        email = email.strip().lower()
+        with self._lock:
+            eid = self._conn.execute(
+                "SELECT id FROM emails WHERE email=?", (email,)
+            ).fetchone()
+            if eid is None:
+                return []
+            rows = self._conn.execute(
+                "SELECT platform, payload, updated_at FROM cookies "
+                "WHERE email_id=? ORDER BY platform",
+                (eid["id"],)
+            ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------- 全局单例

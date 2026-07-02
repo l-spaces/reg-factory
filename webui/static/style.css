@@ -176,7 +176,7 @@ button,input,select,textarea{transition:background .15s,border-color .15s,color 
 .acc-filters select,.acc-filters input{padding:7px 10px;background:var(--panel2);
   border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:13px}
 .acc-filters select{min-width:130px}
-.acc-filters input{flex:1;min-width:160px}
+.acc-filters input{width:240px;min-width:160px}
 .acc-filters select:focus,.acc-filters input:focus{outline:2px solid var(--accent);border-color:var(--accent)}
 
 .acc-table{overflow-x:auto}
@@ -192,10 +192,123 @@ button,input,select,textarea{transition:background .15s,border-color .15s,color 
 .pw-mask{color:var(--dim);letter-spacing:2px}
 .pw-real{color:var(--text)}
 
-.acc-drawer{background:var(--panel);border:1px solid var(--line);border-radius:10px;
-  padding:16px;margin-top:12px}
-.acc-drawer-head{display:flex;align-items:center;justify-content:space-between;
-  margin-bottom:12px;font-weight:600;font-size:14px}
+/* ---- 账号中心：隐藏抽屉，使用新布局 ---- */
+.acc-drawer{display:none !important}
+
+/* 选中行高亮 */
+.tbl tbody tr.selected {
+  background: rgba(79, 140, 255, 0.2);
+  border-left: 3px solid var(--accent);
+}
+
+/* 分页控件 */
+.acc-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.acc-pagination button {
+  padding: 6px 12px;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+.acc-pagination button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.acc-pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: var(--panel2);
+  color: var(--dim);
+}
+.acc-pagination .page-info {
+  color: var(--dim);
+  font-size: 13px;
+  font-family: var(--mono);
+}
+
+/* 章节标题和表容器 */
+.acc-section {
+  margin-top: 24px;
+  background: var(--panel2);
+  border-radius: 8px;
+  padding: 16px;
+}
+.acc-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+}
+
+/* 固定高度的表容器 */
+.acc-table {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 450px; /* 最大高度，避免表格过长 */
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+}
+
+/* 表格容器内的表格 */
+.acc-table .tbl,
+.acc-usages .tbl,
+.acc-cookies .tbl {
+  margin: 0;
+}
+
+/* 固定表头 */
+.acc-table .tbl thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel2);
+  z-index: 1;
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.acc-usages, .acc-cookies {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 280px; /* 统一最大高度 */
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel2);
+}
+
+.acc-usages .tbl thead th,
+.acc-cookies .tbl thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel2);
+  z-index: 1;
+  box-shadow: 0 1px 0 var(--line);
+}
+
+/* 空状态提示样式 */
+.acc-table .hint,
+.acc-usages .hint,
+.acc-cookies .hint {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--dim);
+  font-size: 14px;
+}
+
+/* 截断文本样式 */
+.truncate {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+}
 
 .st-ok     {color:var(--green);font-weight:600}
 .st-error  {color:var(--red);font-weight:600}

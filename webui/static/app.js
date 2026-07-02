@@ -6,6 +6,16 @@ let curSrc = null;     // 当前选中脚本
 let evtSrc = null;     // EventSource
 let smsTimer = null;   // 接码助手倒计时刷新
 
+// 账号中心状态管理
+let accState = {
+    allAccounts: [],      // 所有账号数据（筛选后）
+    currentPage: 1,       // 当前页码
+    pageSize: 10,         // 每页条数
+    selectedEmail: null,  // 当前选中的邮箱
+    usages: [],           // 当前邮箱的 usages
+    cookies: []           // 当前邮箱的 cookies
+};
+
 const $ = (s, r=document) => r.querySelector(s);
 const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 
@@ -413,24 +423,129 @@ async function loadAccList(){
     if(q)  qs.set('q',        q);
     const d = await (await fetch('/api/accounts?'+qs.toString())).json();
     $('#acc-count').textContent = `共 ${d.total} 个`;
-    const rows = (d.accounts||[]).map(a=>`
-      <tr data-email="${esc(a.email)}">
+    accState.allAccounts = d.accounts || [];
+    accState.currentPage = 1;
+    accState.selectedEmail = null;
+    renderEmailsTable(1);
+    renderPagination();
+    renderUsagesTable();
+    renderCookiesTable();
+  }catch(e){ $('#acc-table').innerHTML='<p class="hint">加载失败</p>'; }
+}
+
+function renderEmailsTable(page){
+  const start = (page - 1) * accState.pageSize;
+  const end = start + accState.pageSize;
+  const pageData = accState.allAccounts.slice(start, end);
+
+  if(!pageData.length){
+    $('#acc-table').innerHTML = '<p class="hint">无匹配账号</p>';
+    return;
+  }
+
+  const rows = pageData.map(a=>{
+    const rt = a.refresh_token ? (a.refresh_token.length > 16 ? a.refresh_token.substring(0,16)+'…' : a.refresh_token) : '-';
+    const cid = a.client_id ? (a.client_id.length > 16 ? a.client_id.substring(0,16)+'…' : a.client_id) : '-';
+    return `
+      <tr data-email="${esc(a.email)}" class="${accState.selectedEmail===a.email?'selected':''}">
         <td class="acc-em">${esc(a.email)}</td>
         <td class="acc-pw">
           <span class="pw-mask">••••••</span>
           <span class="pw-real" hidden>${esc(a.password)}</span>
           <button class="mini pw-toggle" type="button">显示</button>
         </td>
+        <td class="truncate">${esc(rt)}</td>
+        <td class="truncate">${esc(cid)}</td>
         <td>${esc(a.source)}</td>
         <td class="dim">${esc((a.created_at||'').slice(0,10))}</td>
-      </tr>`).join('');
-    $('#acc-table').innerHTML = d.total
-      ? `<table class="tbl">
-          <thead><tr><th>邮箱</th><th>密码</th><th>来源</th><th>入库</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>`
-      : '<p class="hint">无匹配账号</p>';
-  }catch(e){ $('#acc-table').innerHTML='<p class="hint">加载失败</p>'; }
+      </tr>`;
+  }).join('');
+
+  $('#acc-table').innerHTML = `
+    <table class="tbl">
+      <thead><tr><th>邮箱</th><th>密码</th><th>Refresh Token</th><th>Client ID</th><th>来源</th><th>入库</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderPagination(){
+  const totalPages = Math.ceil(accState.allAccounts.length / accState.pageSize);
+  if(totalPages <= 1){
+    $('#acc-pagination').innerHTML = '';
+    return;
+  }
+
+  const prev = accState.currentPage > 1;
+  const next = accState.currentPage < totalPages;
+
+  $('#acc-pagination').innerHTML = `
+    <button id="btn-prev-page" ${prev?'':'disabled'}>← 上一页</button>
+    <span class="page-info">${accState.currentPage} / ${totalPages}</span>
+    <button id="btn-next-page" ${next?'':'disabled'}>下一页 →</button>
+  `;
+
+  if(prev) $('#btn-prev-page').onclick = ()=> changePage(accState.currentPage - 1);
+  if(next) $('#btn-next-page').onclick = ()=> changePage(accState.currentPage + 1);
+}
+
+function changePage(page){
+  accState.currentPage = page;
+  renderEmailsTable(page);
+  renderPagination();
+}
+
+function renderUsagesTable(){
+  const container = $('#acc-usages');
+  if(!accState.selectedEmail){
+    container.innerHTML = '<p class="hint">请点击上方邮箱查看使用记录</p>';
+    return;
+  }
+  if(!accState.usages.length){
+    container.innerHTML = '<p class="hint">该邮箱暂无平台使用记录</p>';
+    return;
+  }
+
+  const rows = accState.usages.map(u=>`
+    <tr>
+      <td>${esc(u.platform)}</td>
+      <td class="st-${esc(u.status)}">${esc(u.status)}</td>
+      <td class="dim">${esc(u.reason||'')}</td>
+      <td class="dim">${esc((u.updated_at||'').slice(0,19).replace('T',' '))}</td>
+    </tr>`).join('');
+
+  container.innerHTML = `
+    <table class="tbl">
+      <thead><tr><th>平台</th><th>状态</th><th>原因</th><th>更新时间</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderCookiesTable(){
+  const container = $('#acc-cookies');
+  if(!accState.selectedEmail){
+    container.innerHTML = '<p class="hint">请点击上方邮箱查看 Cookies</p>';
+    return;
+  }
+  if(!accState.cookies.length){
+    container.innerHTML = '<p class="hint">该邮箱暂无 Cookies</p>';
+    return;
+  }
+
+  const rows = accState.cookies.map(c=>{
+    const preview = c.payload ? (c.payload.length > 50 ? c.payload.substring(0,50)+'…' : c.payload) : '';
+    return `
+      <tr>
+        <td>${esc(c.platform)}</td>
+        <td class="truncate">${esc(preview)}</td>
+        <td class="dim">${esc((c.updated_at||'').slice(0,19).replace('T',' '))}</td>
+      </tr>`;
+  }).join('');
+
+  container.innerHTML = `
+    <table class="tbl">
+      <thead><tr><th>平台</th><th>Cookie 内容</th><th>更新时间</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 // 事件委托：打码切换 + 行点击详情
@@ -450,23 +565,20 @@ $('#acc-table').addEventListener('click', e=>{
 });
 
 async function openAccDetail(email){
+  if(accState.selectedEmail === email) return; // 点击已选中的行，不重复请求
+
   try{
     const d = await (await fetch('/api/accounts/'+encodeURIComponent(email))).json();
-    $('#acc-drawer-title').textContent = email;
-    const us = d.usages||[];
-    $('#acc-drawer-body').innerHTML = us.length
-      ? `<table class="tbl">
-          <thead><tr><th>平台</th><th>状态</th><th>原因</th><th>更新</th></tr></thead>
-          <tbody>${us.map(u=>`<tr>
-            <td>${esc(u.platform)}</td>
-            <td class="st-${esc(u.status)}">${esc(u.status)}</td>
-            <td class="dim">${esc(u.reason||'')}</td>
-            <td class="dim">${esc((u.updated_at||'').slice(0,19).replace('T',' '))}</td>
-          </tr>`).join('')}</tbody>
-        </table>`
-      : '<p class="hint">该邮箱暂无平台使用记录</p>';
-    $('#acc-drawer').style.display = 'block';
-  }catch(e){}
+    accState.selectedEmail = email;
+    accState.usages = d.usages || [];
+    accState.cookies = d.cookies || [];
+
+    renderEmailsTable(accState.currentPage); // 重新渲染以更新高亮
+    renderUsagesTable();
+    renderCookiesTable();
+  }catch(e){
+    console.error('加载账号详情失败:', e);
+  }
 }
 
 // 筛选 / 刷新 / 抽屉事件绑定
@@ -478,7 +590,6 @@ $('#acc-q').addEventListener('input', ()=>{
   accQTimer = setTimeout(loadAccList, 250);
 });
 $('#btn-acc-refresh').onclick = loadAccounts;
-$('#acc-drawer-close').onclick = ()=> $('#acc-drawer').style.display='none';
 
 // ---------------------------------------------------------------- 启动
 loadScripts();

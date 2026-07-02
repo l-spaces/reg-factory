@@ -25,6 +25,8 @@ if sys.platform == "win32":
 
 import requests
 
+from common.store import get_store
+
 # Thunderbird client — public, supports personal accounts.
 # 用 Graph Mail.Read 资源域：下游 common/mailbox.get_code_by_token 走 Graph REST
 # (/me/mailFolders/.../messages) 取码，必须拿 graph.microsoft.com 资源的 refresh_token；
@@ -357,6 +359,26 @@ def main():
         for r in results:
             rt = r.get("refresh_token", "")
             print(f"  [OK] {r['email']}  rt={rt[:50]}...")
+
+        # 保存到数据库
+        print(f"\n  Saving to database...")
+        store = get_store()
+        db_success = 0
+        db_failed = 0
+        for r in results:
+            try:
+                store.add_email(
+                    email=r['email'],
+                    password=r['password'],
+                    refresh_token=r.get('refresh_token', ''),
+                    client_id=r.get('client_id', CLIENT_ID),
+                    source='extract_graph'
+                )
+                db_success += 1
+            except Exception as e:
+                print(f"  [DB ERROR] {r['email']}: {e}")
+                db_failed += 1
+        print(f"  Database: {db_success} saved, {db_failed} failed")
 
     print("=" * 60)
 

@@ -426,17 +426,13 @@ def api_accounts_detail(email: str):
 
 
 # ============================================================ sms-man 接码助手
-def _gmail_service_default():
-    return _read_config_val("SMSMAN_APP_ID_GMAIL", "") or "google"
-
-
 @app.post("/api/sms/rent")
 async def api_sms_rent(request: Request):
     try:
         data = await request.json()
     except Exception:
         data = {}
-    service = (data or {}).get("service") or _gmail_service_default()
+    service = (data or {}).get("service") or "google"
     country = str((data or {}).get("country") or "0")
     prefer_multi = (data or {}).get("prefer_multi", True)
     if not _read_config_val("SMSMAN_TOKEN", ""):

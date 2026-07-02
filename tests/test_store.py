@@ -324,5 +324,94 @@ class TestImport(unittest.TestCase):
             s2.close()
 
 
+class TestMarkRegistered(unittest.TestCase):
+    """mark_registered 便捷助手测试。"""
+
+    def setUp(self):
+        from common import store as store_mod
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "mark.db")
+        store_mod._SINGLETON = None
+        self.store = store_mod.get_store(self.db)
+
+    def tearDown(self):
+        from common import store as store_mod
+        self.store.close()
+        store_mod._SINGLETON = None
+        for suffix in ("", "-wal", "-shm"):
+            p = self.db + suffix
+            if os.path.exists(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+
+    def test_mark_registered_adds_email_and_marks_usage(self):
+        """登记后邮箱入库、平台标记为 ok。"""
+        from common.store import mark_registered
+        mark_registered("github", "test@outlook.com", password="pwd123", source="github_reg")
+
+        # 验证邮箱已入库
+        emails = self.store.list_emails()
+        self.assertEqual(len(emails), 1)
+        self.assertEqual(emails[0]["email"], "test@outlook.com")
+        self.assertEqual(emails[0]["password"], "pwd123")
+        self.assertEqual(emails[0]["source"], "github_reg")
+
+        # 验证 usage 标记为 ok
+        usages = self.store.email_usages("test@outlook.com")
+        self.assertEqual(len(usages), 1)
+        self.assertEqual(usages[0]["platform"], "github")
+        self.assertEqual(usages[0]["status"], "ok")
+
+    def test_mark_registered_saves_cookie_dict(self):
+        """提供 dict 格式 cookie，能正确保存和读取。"""
+        from common.store import mark_registered
+        cookie_data = {"key1": "value1", "key2": "value2"}
+        mark_registered("github", "test@outlook.com", cookie_payload=cookie_data)
+
+        # 验证 cookie 已保存
+        saved = self.store.get_cookie("github", email="test@outlook.com")
+        self.assertIsNotNone(saved)
+        import json
+        parsed = json.loads(saved)
+        self.assertEqual(parsed, cookie_data)
+
+    def test_mark_registered_saves_cookie_string(self):
+        """提供 JSON 字符串格式 cookie，能正确保存。"""
+        from common.store import mark_registered
+        cookie_str = '{"token": "abc123"}'
+        mark_registered("chatgpt", "user@test.com", cookie_payload=cookie_str)
+
+        saved = self.store.get_cookie("chatgpt", email="user@test.com")
+        self.assertEqual(saved, cookie_str)
+
+    def test_mark_registered_idempotent(self):
+        """重复调用幂等，不重复插入。"""
+        from common.store import mark_registered
+        mark_registered("github", "dup@test.com", password="pwd1")
+        mark_registered("github", "dup@test.com", password="pwd2")
+
+        emails = self.store.list_emails()
+        self.assertEqual(len(emails), 1)
+        # 密码应保留第一次的值（add_email 的 upsert 逻辑）
+        self.assertEqual(emails[0]["password"], "pwd1")
+
+    def test_mark_registered_no_cookie(self):
+        """不提供 cookie_payload 时，只登记邮箱和 usage。"""
+        from common.store import mark_registered
+        mark_registered("grok", "nocookie@test.com", password="pass")
+
+        # 验证邮箱和 usage
+        emails = self.store.list_emails()
+        self.assertEqual(len(emails), 1)
+        usages = self.store.email_usages("nocookie@test.com")
+        self.assertEqual(usages[0]["platform"], "grok")
+
+        # 验证没有 cookie
+        cookie = self.store.get_cookie("grok", email="nocookie@test.com")
+        self.assertIsNone(cookie)
+
+
 if __name__ == "__main__":
     unittest.main()

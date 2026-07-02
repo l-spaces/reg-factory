@@ -254,9 +254,6 @@ EXTERNAL_LINKS = [
 # ============================================================ 内嵌功能页
 # 直接在面板里 iframe 内嵌的外部页面 + 可选 sms-man 接码助手。
 EMBED_PAGES = [
-    {"id": "gmail", "title": "Gmail 注册", "url": "https://gmails.zeabur.app/gq",
-     "desc": "在线 Gmail 注册(内嵌)。右侧接码助手可租号 + 同号多次取验证码,人工复制粘贴到左侧表单。",
-     "sms_helper": True, "sms_service_default": "google"},
 ]
 
 
@@ -283,7 +280,6 @@ ENV_SCHEMA = [
         {"key": "HERO_SMS_API_KEY", "secret": True, "help": "hero-sms.com 备用接码 key"},
         {"key": "SMSMAN_TOKEN", "secret": True, "help": "sms-man.com 接码 key(Codex add-phone 主用)"},
         {"key": "SMSMAN_APP_ID_OPENAI", "default": "openai", "help": "sms-man OpenAI 服务 id(openai 自动解析为 2754)"},
-        {"key": "SMSMAN_APP_ID_GMAIL", "default": "google", "help": "sms-man Gmail/Google 服务 id(google 自动解析;接码助手默认用它)"},
         {"key": "SMSMAN_COUNTRY_ID_OPENAI", "default": "0", "help": "国家 id(0=随机/按价格)"},
     ]},
     {"group": "打码平台(可选)", "items": [

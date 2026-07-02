@@ -867,6 +867,19 @@ async def register_one(email, password, cookies, p, refresh_token=None, auto=Fal
         )
         if key_val:
             print(f"  [OK] github session cookie saved")
+            # 登记到账号中心（失败隔离：不影响注册返回值）
+            try:
+                from common.store import mark_registered
+                mark_registered(
+                    platform="github",
+                    email=email,
+                    password=password,  # 邮箱密码，非 gh_password
+                    cookie_payload=key_val,
+                    source="github_reg"
+                )
+                print(f"  [OK] registered to account store")
+            except Exception as e:
+                print(f"  [WARN] failed to register to account store: {e}")
             return key_val
         print("  [FAIL] no session cookie")
         return None

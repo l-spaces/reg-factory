@@ -43,7 +43,7 @@ async function loadScripts(){
   SCRIPTS.forEach(s => (cats[s.category]=cats[s.category]||[]).push(s));
   nav.innerHTML = '';
 
-  // 内嵌功能页(Gmail 等) —— 放最上面
+  // 内嵌功能页 —— 放最上面
   try{
     EMBEDS = (await (await fetch('/api/embeds')).json()).embeds || [];
     if(EMBEDS.length){

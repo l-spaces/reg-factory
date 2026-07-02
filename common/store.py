@@ -272,3 +272,29 @@ def get_store(db_path=None):
         if _SINGLETON is None:
             _SINGLETON = AccountStore(db_path or DEFAULT_DB)
         return _SINGLETON
+
+
+# ---------------------------------------------------------------- 便捷登记助手
+def mark_registered(platform, email, password="", cookie_payload=None, source="reg"):
+    """可复用登记助手：确保邮箱入库 → 标记平台使用 → 保存 cookie（若有）。
+
+    用于注册流程成功时快速登记账号到 AccountStore。走全局单例。
+
+    Args:
+        platform: 平台名（如 "github"、"chatgpt"）
+        email: 邮箱地址
+        password: 邮箱密码（非平台密码）
+        cookie_payload: cookie 数据（JSON 字符串或 dict），None 时不保存
+        source: 来源标识（如 "github_reg"、"outlook_reg"）
+    """
+    store = get_store()
+    # 1. 确保邮箱入库（幂等）
+    store.add_email(email, password=password, source=source)
+    # 2. 标记平台使用为 ok
+    store.mark_used(platform, email)
+    # 3. 保存 cookie（若提供）
+    if cookie_payload is not None:
+        import json
+        if isinstance(cookie_payload, dict):
+            cookie_payload = json.dumps(cookie_payload, ensure_ascii=False)
+        store.save_cookie(platform, cookie_payload, email=email)

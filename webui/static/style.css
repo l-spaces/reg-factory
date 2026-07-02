@@ -33,7 +33,8 @@ body{margin:0;background:var(--bg);color:var(--text);
 .linkbtn:hover{background:var(--panel2)}
 
 .content{flex:1;overflow-y:auto;padding:18px}
-#view-run{display:flex;flex-direction:column;gap:16px;height:100%}
+#view-run{display:flex;flex-direction:row;gap:16px;height:100%}
+#form-panel{width:420px;flex-shrink:0;overflow-y:auto}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px}
 .hint{color:var(--dim)}
 .form-title{font-size:18px;font-weight:600;margin:0 0 4px}

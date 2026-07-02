@@ -373,6 +373,13 @@ async def api_mailpool_import(request: Request):
             continue
         seen.add(email)
         out_lines.append("----".join(parsed))
+        # ⑤：同时落库账号中心（幂等 upsert，与 emails.txt 兼容双写供 ⑨ 过渡）
+        _accounts_store().add_email(
+            email,
+            parsed[1] if len(parsed) >= 2 else "",
+            parsed[2] if len(parsed) >= 3 else "",
+            parsed[3] if len(parsed) >= 4 else "",
+            source="import")
         added += 1
     if out_lines:
         # 追加(确保前面有换行)
@@ -384,6 +391,38 @@ async def api_mailpool_import(request: Request):
     total = len(_existing_emails())
     return {"ok": True, "added": added, "skipped": skipped, "bad": bad,
             "bad_samples": bad_samples, "total": total}
+
+
+# ==================================================== 账号中心查询（只读接口）
+# ⑤：复用 common.store 的进程级单例，不自建 AccountStore 实例（与 mailpool 双写共享连接）。
+from common.store import get_store as _get_store
+
+_ACCOUNTS_DB = os.path.join(ROOT, "data", "accounts.db")
+
+
+def _accounts_store():
+    return _get_store(_ACCOUNTS_DB)
+
+
+@app.get("/api/accounts")
+def api_accounts_list(platform: str = "", status: str = "", q: str = ""):
+    rows = _accounts_store().list_emails(platform=platform or None,
+                                         status=status or None)
+    if q:
+        ql = q.lower()
+        rows = [r for r in rows if ql in r["email"].lower()]
+    return {"total": len(rows), "accounts": rows}
+
+
+# 注意：/api/accounts/stats 必须定义在 /api/accounts/{email} 之前，否则被路径参数吞掉
+@app.get("/api/accounts/stats")
+def api_accounts_stats():
+    return _accounts_store().stats()
+
+
+@app.get("/api/accounts/{email}")
+def api_accounts_detail(email: str):
+    return {"email": email, "usages": _accounts_store().email_usages(email)}
 
 
 # ============================================================ sms-man 接码助手

@@ -277,6 +277,14 @@ def append_to_emails_pool(email, password):
         with open(EMAILS_POOL, "a", encoding="utf-8") as f:
             f.write(f"{email}----{password}----{token}----{client_id}\n")
         log(f"emails.txt += {email} (token={'yes' if token != 'fresh' else 'fresh'})", "OK")
+        # ⑩：同步桥接进账号中心 DB(幂等 upsert)，让 --from-pool 消费方(register_chatgpt/
+        # grok/three)即时可见新号，不再依赖手动重跑 import。store 写失败仅告警，
+        # 不影响 emails.txt 主路径（token/client_id 原样写入，含 "fresh" 哨兵值）。
+        try:
+            from common.store import get_store
+            get_store().add_email(email, password, token, client_id, source="outlook_reg")
+        except Exception as _e:
+            log(f"account-store 桥接失败(忽略): {type(_e).__name__}: {_e}", "WARN")
     except Exception as e:
         log(f"append_to_emails_pool failed: {type(e).__name__}: {e}", "WARN")
 

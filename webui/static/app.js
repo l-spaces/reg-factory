@@ -449,11 +449,7 @@ function renderEmailsTable(page){
     return `
       <tr data-email="${esc(a.email)}" class="${accState.selectedEmail===a.email?'selected':''}">
         <td class="acc-em">${esc(a.email)}</td>
-        <td class="acc-pw">
-          <span class="pw-mask">••••••</span>
-          <span class="pw-real" hidden>${esc(a.password)}</span>
-          <button class="mini pw-toggle" type="button">显示</button>
-        </td>
+        <td class="acc-pw">${esc(a.password)}</td>
         <td class="truncate">${esc(rt)}</td>
         <td class="truncate">${esc(cid)}</td>
         <td>${esc(a.source)}</td>
@@ -552,20 +548,8 @@ function renderCookiesTable(){
     </table>`;
 }
 
-// 事件委托：打码切换 + 行点击详情 + 编辑/删除按钮
+// 事件委托：编辑/删除按钮 + 行点击详情
 $('#acc-table').addEventListener('click', e=>{
-  // 密码打码切换
-  const tg = e.target.closest('.pw-toggle');
-  if(tg){
-    e.stopPropagation();
-    const td = tg.closest('.acc-pw');
-    const m = td.querySelector('.pw-mask'), r = td.querySelector('.pw-real');
-    const show = r.hidden;
-    r.hidden = !show; m.hidden = show;
-    tg.textContent = show ? '隐藏' : '显示';
-    return;
-  }
-
   // 删除按钮
   const delBtn = e.target.closest('.btn-delete');
   if(delBtn){

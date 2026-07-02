@@ -2,6 +2,8 @@
 .env
 
 .idea
+.claude
+.trellis
 
 # Python
 __pycache__/
@@ -9,6 +11,8 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+data/
+docs/
 
 # 运行期数据 / PII（账号、cookie、日志、截图）
 cookies/**

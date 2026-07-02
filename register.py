@@ -107,40 +107,10 @@ def _pick_claude_node():
 # web2api 验证服务地址
 WEB2API_BASE = "http://127.0.0.1:9000"
 
-# 邮箱文件路径
-EMAILS_FILE = "emails.txt"
-EMAILS_USED_FILE = "emails_used.txt"
-EMAILS_ERROR_FILE = "emails_error.txt"
-
-
-def verify_registered_outlook(email, password, tag="[outlook]"):
-    """Verify the newly registered Outlook account is usable before downstream use."""
-    if check_account_api is None:
-        print(f"  {tag} verify skipped: check_outlook_status unavailable")
-        return True
-    result = check_account_api(email, password)
-    status = result.get("status")
-    code = result.get("code") or ""
-    msg = result.get("message") or ""
-    print(f"  {tag} post-register verify: {status} {code} {msg[:80]}")
-    return status == "ok"
-
-
-def _load_used_emails():
-    """加载已使用和异常邮箱集合"""
-    used = set()
-    for fpath in [EMAILS_USED_FILE, EMAILS_ERROR_FILE]:
-        if os.path.exists(fpath):
-            with open(fpath, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        used.add(line.split("----")[0].strip().lower())
-    return used
-
-
-import threading
-_email_lock = threading.Lock()
+# 修正 ⑥：邮箱取号/标记统一走账号中心(common.store)，消除 register.py 的独立 txt 池。
+# 平台键用 "claude"——本文件取号路径(register()→CLAUDE_LOGIN_URL)注册的是 Claude 账号，
+# 且无其它 "claude" 消费方冲突，账号中心可正确反映"该邮箱已用于 claude"。
+from common import emails as _email_pool
 
 
 def validate_session_key(session_key: str) -> bool:
@@ -280,43 +250,23 @@ async def validate_session_key_with_page(page, session_key: str) -> bool:
 
 
 def read_next_email_from_file():
-    """从 emails.txt 读取下一个未使用的邮箱，返回 (email, password, token) 或 None
-    线程安全：读取后立即标记为已使用，防止并发取到同一个"""
-    with _email_lock:
-        if not os.path.exists(EMAILS_FILE):
-            print(f"  [email-file] {EMAILS_FILE} not found")
-            return None
-        used = _load_used_emails()
-        with open(EMAILS_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split("----")
-                email_addr = parts[0].strip().lower()
-                if email_addr in used:
-                    continue
-                password = parts[1].strip() if len(parts) >= 2 else ""
-                token = parts[2].strip() if len(parts) >= 3 else ""
-                # 立即标记为已使用，防止其他线程取到同一个
-                with open(EMAILS_USED_FILE, "a", encoding="utf-8") as uf:
-                    uf.write(f"{email_addr}----{password}----reserved\n")
-                print(f"  [email-file] picked: {email_addr}")
-                return email_addr, password, token
-        print(f"  [email-file] no unused emails left in {EMAILS_FILE}")
-        return None
+    """取下一个未被占用的邮箱，返回 (email, password, token) 或 None。
+    修正 ⑥：委托 common.store（平台键 "claude"），取出即 reserved 防并发重复。
+    函数名与返回三元组保持不变，调用点(3371 等)无需改动。"""
+    got = _email_pool.next_email("claude")
+    if got:
+        return got[0], got[1], got[2]
+    return None
 
 
 def mark_email_used(email, password=""):
-    """记录已成功使用的邮箱"""
-    with open(EMAILS_USED_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{email}----{password}\n")
+    """记录已成功使用的邮箱（修正 ⑥：委托 store，平台键 "claude"）"""
+    _email_pool.mark_used("claude", email, password)
 
 
 def mark_email_error(email, password="", reason=""):
-    """记录异常邮箱"""
-    with open(EMAILS_ERROR_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{email}----{password}----{reason}\n")
+    """记录异常邮箱（修正 ⑥：委托 store，平台键 "claude"）"""
+    _email_pool.mark_error("claude", email, password, reason)
 
 
 # Arkose Labs public key for Microsoft signup

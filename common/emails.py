@@ -1,76 +1,41 @@
 # -*- coding: utf-8 -*-
 """
-common/emails.py — 邮箱供给（平台独立的占用记录）
+common/emails.py — 邮箱供给（兼容层）
 
-读取 emails.txt（email----password----refresh_token----client_id），
-每个平台用独立的 emails_used_<platform>.txt 记录已占用，互不干扰。
-线程安全。
+保留历史模块级函数签名（next_email / mark_used / mark_error），
+内部委托 common.store 的全局 AccountStore 单例（data/accounts.db）。
+现有调用方（register_chatgpt.py / register_grok.py / register_three_platforms.py /
+register.py 等）导入方式与行为不变，数据落 SQLite。
+
+⚠ 过渡硬门（修正 ⑨）：首次切到 DB 前必须先运行
+    python -m tools.import_to_store
+把现有 emails.txt / emails_used_*.txt / emails_error_*.txt 及 register.py 的
+emails_used.txt / emails_error.txt 导入，否则库为空、next_email 一律返回 None
+（线上取号会骤然全部失败）。
 """
 
-import os
 import sys
-import threading
+
+from common.store import get_store
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
-
-EMAILS_FILE = "emails.txt"
-_lock = threading.Lock()
-
-
-def _used_file(platform):
-    return f"emails_used_{platform}.txt"
-
-
-def _error_file(platform):
-    return f"emails_error_{platform}.txt"
-
-
-def _load_used(platform):
-    used = set()
-    for fp in [_used_file(platform), _error_file(platform)]:
-        if os.path.exists(fp):
-            with open(fp, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#"):
-                        used.add(line.split("----")[0].strip().lower())
-    return used
 
 
 def next_email(platform):
     """取下一个未被该平台占用的邮箱，返回 (email, password, refresh_token, client_id) 或 None。
     取出即标记 reserved，防止并发重复。"""
-    with _lock:
-        if not os.path.exists(EMAILS_FILE):
-            print(f"  [email] {EMAILS_FILE} not found")
-            return None
-        used = _load_used(platform)
-        with open(EMAILS_FILE, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split("----")
-                email = parts[0].strip()
-                if email.lower() in used:
-                    continue
-                password = parts[1].strip() if len(parts) >= 2 else ""
-                token = parts[2].strip() if len(parts) >= 3 else ""
-                client_id = parts[3].strip() if len(parts) >= 4 else ""
-                with open(_used_file(platform), "a", encoding="utf-8") as uf:
-                    uf.write(f"{email}----{password}----reserved\n")
-                print(f"  [email] picked for {platform}: {email}")
-                return email, password, token, client_id
+    got = get_store().next_email(platform)
+    if got:
+        print(f"  [email] picked for {platform}: {got[0]}")
+    else:
         print(f"  [email] no unused emails left for {platform}")
-        return None
+    return got
 
 
 def mark_used(platform, email, password=""):
-    with open(_used_file(platform), "a", encoding="utf-8") as f:
-        f.write(f"{email}----{password}----ok\n")
+    get_store().mark_used(platform, email, password)
 
 
 def mark_error(platform, email, password="", reason=""):
-    with open(_error_file(platform), "a", encoding="utf-8") as f:
-        f.write(f"{email}----{password}----{reason}\n")
+    get_store().mark_error(platform, email, password, reason)

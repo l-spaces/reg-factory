@@ -673,9 +673,14 @@ async def api_env_set(request: Request):
 
 
 def _build_cmd(script, args):
-    """把前端提交的 args(dict) 按 schema 拼成命令行 list。"""
+    """把前端提交的 args(dict) 按 schema 拼成命令行 list。
+
+    支持虚拟文件：位置参数如果以 __VIRTUAL__\n 开头，会创建临时文件。
+    返回：(cmd, temp_files) - cmd 是命令行列表，temp_files 是需要清理的临时文件路径列表。
+    """
     cmd = [sys.executable, "-u", os.path.join(ROOT, script["file"])]
     positional = []
+    temp_files = []  # 记录需要清理的临时文件
     by_flag = {a["flag"]: a for a in script["args"]}
     for flag, spec in by_flag.items():
         if flag not in args:
@@ -683,7 +688,20 @@ def _build_cmd(script, args):
         val = args[flag]
         typ = spec["type"]
         if spec.get("positional"):
-            if val not in (None, "", []):
+            # 检测虚拟文件标记：__VIRTUAL__\n 开头表示内容而非路径
+            if isinstance(val, str) and val.startswith("__VIRTUAL__\n"):
+                content = val[len("__VIRTUAL__\n"):]
+
+                # 创建临时文件
+                os.makedirs("temp", exist_ok=True)
+                temp_path = os.path.join("temp", f"accounts_{int(time.time()*1000)}.txt")
+
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+
+                positional.append(temp_path)
+                temp_files.append(temp_path)  # 标记需要清理
+            elif val not in (None, "", []):
                 positional.append(str(val))
             continue
         if typ == "bool":
@@ -698,7 +716,7 @@ def _build_cmd(script, args):
                 cmd.append(flag)
                 cmd.append(str(val))
     cmd.extend(positional)
-    return cmd
+    return cmd, temp_files
 
 
 def _child_env():
@@ -723,7 +741,7 @@ async def api_run(request: Request):
     script = schema.script_by_id(sid)
     if not script:
         return JSONResponse({"error": f"未知脚本: {sid}"}, status_code=400)
-    cmd = _build_cmd(script, args)
+    cmd, temp_files = _build_cmd(script, args)  # 接收临时文件列表
     proc = await asyncio.create_subprocess_exec(
         *cmd, cwd=ROOT, env=_child_env(),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
@@ -731,7 +749,8 @@ async def api_run(request: Request):
     _run_seq[0] += 1
     run_id = f"r{_run_seq[0]}"
     rec = {"proc": proc, "lines": [], "done": False, "script": sid,
-           "cmd": " ".join(cmd), "started": time.strftime("%H:%M:%S")}
+           "cmd": " ".join(cmd), "started": time.strftime("%H:%M:%S"),
+           "temp_files": temp_files}  # 记录临时文件列表
     RUNS[run_id] = rec
 
     async def _pump():
@@ -745,6 +764,16 @@ async def api_run(request: Request):
         finally:
             await proc.wait()
             rec["done"] = True
+            rec["lines"].append(f"[webui] 进程结束 exit={proc.returncode}")
+
+            # 清理临时文件
+            for tf in rec.get("temp_files", []):
+                try:
+                    if os.path.isfile(tf):
+                        os.remove(tf)
+                        rec["lines"].append(f"[webui] 已清理临时文件: {tf}")
+                except Exception as e:
+                    rec["lines"].append(f"[webui] 清理临时文件失败: {tf} - {e}")
             rec["lines"].append(f"[webui] 进程结束 exit={proc.returncode}")
 
     asyncio.create_task(_pump())

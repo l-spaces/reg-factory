@@ -107,32 +107,175 @@ function renderForm(s){
   h.innerHTML = `<h2 class="form-title">${s.title}</h2><p class="form-desc">${s.desc||''}</p>`;
   p.appendChild(h);
 
-  s.args.forEach(a=>{
-    const f = document.createElement('div'); f.className='field';
-    const key = a.flag.replace(/^--/,'');
-    const label = a.label || key;
-    if(a.type==='bool'){
-      f.className='field checkbox';
-      f.innerHTML = `<input type="checkbox" id="f_${key}" ${a.default?'checked':''}>
-        <label for="f_${key}">${label}</label>`;
-      if(a.help){ const hh=document.createElement('div'); hh.className='fhelp'; hh.textContent=a.help; f.appendChild(hh); }
-    }else if(a.type==='choice'){
-      f.innerHTML = `<label>${label}</label>
-        <select id="f_${key}">${a.choices.map(c=>`<option ${c==a.default?'selected':''}>${c}</option>`).join('')}</select>
-        ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
-    }else if(a.type==='multi'){
-      const def = a.default||[];
-      f.innerHTML = `<label>${label}</label>
-        <div class="multi">${a.choices.map(c=>`<label><input type="checkbox" value="${c}" ${def.includes(c)?'checked':''} data-multi="${key}">${c}</label>`).join('')}</div>
-        ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
-    }else{
-      const t = a.secret ? 'password' : (a.type==='int' ? 'number' : 'text');
-      f.innerHTML = `<label>${label}</label>
-        <input type="${t}" id="f_${key}" value="${a.default!==undefined&&a.default!==''?a.default:''}" placeholder="${a.help||''}">
-        ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
+  // 特殊处理：extract_graph_tokens 脚本添加账号中心多选功能
+  if(s.id === 'extract_graph_tokens'){
+    // 添加模式选择器
+    const modeSelector = document.createElement('div');
+    modeSelector.className = 'mode-selector';
+    modeSelector.innerHTML = `
+      <label><input type="radio" name="input-mode" value="manual" checked> 手动输入</label>
+      <label><input type="radio" name="input-mode" value="account-center"> 从账号中心选择</label>
+    `;
+    p.appendChild(modeSelector);
+
+    // 手动输入区域（默认显示）
+    const manualInputs = document.createElement('div');
+    manualInputs.id = 'manual-inputs';
+    manualInputs.className = 'input-group';
+
+    // 账号选择区域（默认隐藏）
+    const accountSelector = document.createElement('div');
+    accountSelector.id = 'account-selector';
+    accountSelector.className = 'input-group';
+    accountSelector.style.display = 'none';
+    accountSelector.innerHTML = `
+      <div class="field">
+        <div class="field-label-row">
+          <label>选择邮箱</label>
+          <button class="btn-refresh-accounts" id="btn-refresh-accounts">🔄 刷新</button>
+        </div>
+        <div class="account-table-selector">
+          <div class="selector-header">
+            <input type="text" class="selector-search" placeholder="搜索邮箱...">
+            <div class="selector-summary">已选择 <b id="selected-count">0</b> 个邮箱</div>
+          </div>
+          <div class="selector-table-wrapper">
+            <table class="selector-table">
+              <thead>
+                <tr>
+                  <th width="40"><input type="checkbox" id="select-all-accounts"></th>
+                  <th>邮箱</th>
+                  <th width="80">RT</th>
+                </tr>
+              </thead>
+              <tbody id="account-list"></tbody>
+            </table>
+          </div>
+          <div class="selector-pagination" id="account-pagination"></div>
+        </div>
+      </div>
+    `;
+
+    // 渲染参数到对应区域（跳过 extract_graph_tokens 的 accounts_file）
+    s.args.forEach(a=>{
+      const f = document.createElement('div'); f.className='field';
+      const key = a.flag.replace(/^--/,'');
+      const label = a.label || key;
+
+      // 只跳过 extract_graph_tokens 的 accounts_file 位置参数
+      if(a.positional && a.flag === 'accounts_file') return;
+
+      // concurrency 参数放在外部（两种模式都需要）
+      if(key === 'concurrency'){
+        const t = a.type==='int' ? 'number' : 'text';
+        f.innerHTML = `<label>${label}</label>
+          <input type="${t}" id="f_${key}" value="${a.default!==undefined&&a.default!==''?a.default:''}" placeholder="${a.help||''}">
+          ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
+        p.appendChild(f);
+        return;
+      }
+
+      // 其他参数（--email, --password）放入手动输入区域
+      if(a.type==='bool'){
+        f.className='field checkbox';
+        f.innerHTML = `<input type="checkbox" id="f_${key}" ${a.default?'checked':''}>
+          <label for="f_${key}">${label}</label>`;
+        if(a.help){ const hh=document.createElement('div'); hh.className='fhelp'; hh.textContent=a.help; f.appendChild(hh); }
+      }else if(a.type==='choice'){
+        f.innerHTML = `<label>${label}</label>
+          <select id="f_${key}">${a.choices.map(c=>`<option ${c==a.default?'selected':''}>${c}</option>`).join('')}</select>
+          ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
+      }else if(a.type==='multi'){
+        const def = a.default||[];
+        f.innerHTML = `<label>${label}</label>
+          <div class="multi">${a.choices.map(c=>`<label><input type="checkbox" value="${c}" ${def.includes(c)?'checked':''} data-multi="${key}">${c}</label>`).join('')}</div>
+          ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
+      }else{
+        const t = a.secret ? 'password' : (a.type==='int' ? 'number' : 'text');
+        f.innerHTML = `<label>${label}</label>
+          <input type="${t}" id="f_${key}" value="${a.default!==undefined&&a.default!==''?a.default:''}" placeholder="${a.help||''}">
+          ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
+      }
+      manualInputs.appendChild(f);
+    });
+
+    p.appendChild(manualInputs);
+    p.appendChild(accountSelector);
+
+    // 绑定模式切换事件
+    $$('input[name="input-mode"]', p).forEach(radio=>{
+      radio.addEventListener('change', e=>{
+        const mode = e.target.value;
+        manualInputs.style.display = mode==='manual' ? 'block' : 'none';
+        accountSelector.style.display = mode==='account-center' ? 'block' : 'none';
+
+        // 切换时清空输入
+        if(mode==='account-center'){
+          manualInputs.querySelectorAll('input').forEach(i=>i.value='');
+          loadAccountsForSelector();
+        }else{
+          window.accountSelectorState = {allAccounts:[], filteredAccounts:[], selectedEmails:new Set(), currentPage:1, pageSize:10};
+          updateSelectionSummary();
+        }
+      });
+    });
+
+    // 绑定搜索事件
+    $('.selector-search', p).addEventListener('input', e=>{
+      const keyword = e.target.value.toLowerCase().trim();
+      const state = window.accountSelectorState || {allAccounts:[], currentPage:1, pageSize:10};
+      if(!keyword){
+        state.filteredAccounts = [...state.allAccounts];
+      }else{
+        state.filteredAccounts = state.allAccounts.filter(a=>a.email.toLowerCase().includes(keyword));
+      }
+      state.currentPage = 1; // 搜索后重置到第一页
+      renderAccountList();
+      renderAccountPagination();
+    });
+
+    // 绑定刷新按钮
+    const refreshBtn = $('#btn-refresh-accounts', p);
+    if(refreshBtn){
+      refreshBtn.onclick = ()=>{
+        const originalText = refreshBtn.textContent;
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = '刷新中...';
+        loadAccountsForSelector().finally(()=>{
+          refreshBtn.disabled = false;
+          refreshBtn.textContent = originalText;
+        });
+      };
     }
-    p.appendChild(f);
-  });
+  }else{
+    // 其他脚本使用原有逻辑
+    s.args.forEach(a=>{
+      const f = document.createElement('div'); f.className='field';
+      const key = a.flag.replace(/^--/,'');
+      const label = a.label || key;
+      if(a.type==='bool'){
+        f.className='field checkbox';
+        f.innerHTML = `<input type="checkbox" id="f_${key}" ${a.default?'checked':''}>
+          <label for="f_${key}">${label}</label>`;
+        if(a.help){ const hh=document.createElement('div'); hh.className='fhelp'; hh.textContent=a.help; f.appendChild(hh); }
+      }else if(a.type==='choice'){
+        f.innerHTML = `<label>${label}</label>
+          <select id="f_${key}">${a.choices.map(c=>`<option ${c==a.default?'selected':''}>${c}</option>`).join('')}</select>
+          ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
+      }else if(a.type==='multi'){
+        const def = a.default||[];
+        f.innerHTML = `<label>${label}</label>
+          <div class="multi">${a.choices.map(c=>`<label><input type="checkbox" value="${c}" ${def.includes(c)?'checked':''} data-multi="${key}">${c}</label>`).join('')}</div>
+          ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
+      }else{
+        const t = a.secret ? 'password' : (a.type==='int' ? 'number' : 'text');
+        f.innerHTML = `<label>${label}</label>
+          <input type="${t}" id="f_${key}" value="${a.default!==undefined&&a.default!==''?a.default:''}" placeholder="${a.help||''}">
+          ${a.help?`<div class="fhelp">${a.help}</div>`:''}`;
+      }
+      p.appendChild(f);
+    });
+  }
 
   const btn = document.createElement('button');
   btn.className='btn-run'; btn.textContent='▶ 运行';
@@ -144,14 +287,47 @@ function renderForm(s){
 
 function collectArgs(s){
   const args = {};
+
+  // 特殊处理：extract_graph_tokens 脚本的账号中心模式
+  if(s.id === 'extract_graph_tokens'){
+    const mode = $('input[name="input-mode"]:checked')?.value || 'manual';
+
+    if(mode === 'account-center'){
+      // 从账号中心选择模式：构造虚拟文件内容
+      const selected = [];
+      $$('#account-list input[type="checkbox"]:checked').forEach(cb=>{
+        selected.push({
+          email: cb.value,
+          password: cb.dataset.password
+        });
+      });
+
+      if(selected.length > 0){
+        const content = selected.map(a=>`${a.email}----${a.password}`).join('\n');
+        args['accounts_file'] = `__VIRTUAL__\n${content}`;
+      }
+
+      // 收集 concurrency 参数
+      const concurrency = $('#f_concurrency')?.value.trim();
+      if(concurrency) args['--concurrency'] = parseInt(concurrency, 10);
+
+      return args;
+    }
+    // 手动输入模式：只收集 --email, --password, --concurrency（跳过 accounts_file）
+  }
+
+  // 默认逻辑（包括手动输入模式）
   s.args.forEach(a=>{
+    // 只跳过 extract_graph_tokens 的 accounts_file 位置参数
+    if(s.id === 'extract_graph_tokens' && a.positional && a.flag === 'accounts_file') return;
+
     const key = a.flag.replace(/^--/,'');
     if(a.type==='bool'){
-      args[a.flag] = $(`#f_${key}`).checked;
+      args[a.flag] = $(`#f_${key}`)?.checked;
     }else if(a.type==='multi'){
       args[a.flag] = $$(`input[data-multi="${key}"]:checked`).map(x=>x.value);
     }else{
-      const v = $(`#f_${key}`).value.trim();
+      const v = $(`#f_${key}`)?.value.trim();
       if(v!=='') args[a.flag] = a.type==='int' ? parseInt(v,10) : v;
     }
   });
@@ -742,6 +918,174 @@ $('#btn-edit-confirm').onclick = async ()=>{
     btn.textContent = oldText;
   }
 };
+
+// ---------------------------------------------------------------- 账号选择器（extract_graph_tokens 专用）
+// 全局状态
+window.accountSelectorState = {
+  allAccounts: [],
+  filteredAccounts: [],
+  selectedEmails: new Set(),
+  currentPage: 1,
+  pageSize: 10
+};
+
+// 加载账号列表
+async function loadAccountsForSelector(){
+  try{
+    const resp = await fetch('/api/accounts');
+    const data = await resp.json();
+    window.accountSelectorState.allAccounts = data.accounts || [];
+    window.accountSelectorState.filteredAccounts = [...window.accountSelectorState.allAccounts];
+    window.accountSelectorState.selectedEmails.clear();
+    window.accountSelectorState.currentPage = 1;
+    renderAccountList();
+    renderAccountPagination();
+  }catch(e){
+    console.error('Failed to load accounts:', e);
+    const list = $('#account-list');
+    if(list) list.innerHTML = '<tr><td colspan="3" class="hint">加载失败，请刷新重试</td></tr>';
+  }
+}
+
+// 渲染账号表格（分页）
+function renderAccountList(){
+  const list = $('#account-list');
+  if(!list) return;
+
+  const state = window.accountSelectorState;
+  const accounts = state.filteredAccounts;
+
+  if(!accounts.length){
+    list.innerHTML = '<tr><td colspan="3" class="hint">暂无匹配的邮箱</td></tr>';
+    renderAccountPagination();
+    return;
+  }
+
+  // 分页计算
+  const start = (state.currentPage - 1) * state.pageSize;
+  const end = start + state.pageSize;
+  const pageAccounts = accounts.slice(start, end);
+
+  list.innerHTML = pageAccounts.map(a=>{
+    const checked = state.selectedEmails.has(a.email) ? 'checked' : '';
+    const hasToken = a.refresh_token && a.refresh_token.trim() !== '';
+    return `
+      <tr>
+        <td><input type="checkbox" value="${esc(a.email)}" data-password="${esc(a.password)}" ${checked}></td>
+        <td>${esc(a.email)}</td>
+        <td class="rt-status">${hasToken ? '<span class="has-rt">有RT</span>' : ''}</td>
+      </tr>`;
+  }).join('');
+
+  // 绑定复选框事件
+  list.querySelectorAll('input[type="checkbox"]').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      if(cb.checked){
+        state.selectedEmails.add(cb.value);
+      }else{
+        state.selectedEmails.delete(cb.value);
+      }
+      updateSelectionSummary();
+      updateSelectAllCheckbox();
+    });
+  });
+
+  // 绑定全选复选框
+  const selectAll = $('#select-all-accounts');
+  if(selectAll){
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+
+    // 检查当前页是否全选
+    const currentPageEmails = pageAccounts.map(a => a.email);
+    const selectedInPage = currentPageEmails.filter(e => state.selectedEmails.has(e));
+    if(selectedInPage.length === currentPageEmails.length && currentPageEmails.length > 0){
+      selectAll.checked = true;
+    }else if(selectedInPage.length > 0){
+      selectAll.indeterminate = true;
+    }
+
+    selectAll.onclick = ()=>{
+      const shouldCheck = !selectAll.checked;
+      pageAccounts.forEach(a=>{
+        if(shouldCheck){
+          state.selectedEmails.add(a.email);
+        }else{
+          state.selectedEmails.delete(a.email);
+        }
+      });
+      renderAccountList();
+      updateSelectionSummary();
+    };
+  }
+}
+
+// 渲染分页控件
+function renderAccountPagination(){
+  const pagination = $('#account-pagination');
+  if(!pagination) return;
+
+  const state = window.accountSelectorState;
+  const totalPages = Math.ceil(state.filteredAccounts.length / state.pageSize);
+
+  if(totalPages <= 1){
+    pagination.innerHTML = '';
+    return;
+  }
+
+  const prev = state.currentPage > 1;
+  const next = state.currentPage < totalPages;
+
+  pagination.innerHTML = `
+    <button class="page-btn" ${prev?'':'disabled'} data-page="prev">← 上一页</button>
+    <span class="page-info">第 ${state.currentPage} / ${totalPages} 页</span>
+    <button class="page-btn" ${next?'':'disabled'} data-page="next">下一页 →</button>
+  `;
+
+  pagination.querySelectorAll('.page-btn').forEach(btn=>{
+    btn.onclick = ()=>{
+      if(btn.dataset.page === 'prev'){
+        state.currentPage--;
+      }else{
+        state.currentPage++;
+      }
+      renderAccountList();
+      renderAccountPagination();
+    };
+  });
+}
+
+// 更新选中数量摘要
+function updateSelectionSummary(){
+  const countEl = $('#selected-count');
+  if(countEl){
+    countEl.textContent = window.accountSelectorState.selectedEmails.size;
+  }
+}
+
+// 更新全选复选框状态
+function updateSelectAllCheckbox(){
+  const selectAll = $('#select-all-accounts');
+  if(!selectAll) return;
+
+  const state = window.accountSelectorState;
+  const start = (state.currentPage - 1) * state.pageSize;
+  const end = start + state.pageSize;
+  const pageAccounts = state.filteredAccounts.slice(start, end);
+
+  const currentPageEmails = pageAccounts.map(a => a.email);
+  const selectedInPage = currentPageEmails.filter(e => state.selectedEmails.has(e));
+
+  selectAll.checked = false;
+  selectAll.indeterminate = false;
+
+  if(selectedInPage.length === currentPageEmails.length && currentPageEmails.length > 0){
+    selectAll.checked = true;
+  }else if(selectedInPage.length > 0){
+    selectAll.indeterminate = true;
+  }
+}
+
 
 // ---------------------------------------------------------------- 启动
 loadScripts();

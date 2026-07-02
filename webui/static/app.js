@@ -147,10 +147,24 @@ function collectArgs(s){
 }
 
 // ---------------------------------------------------------------- 运行 + SSE 日志
+function escHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+function logClass(line){
+  if(/error|fail|失败|错误/i.test(line)) return 'log-err';
+  if(/warn|警告/i.test(line)) return 'log-warn';
+  if(/\bok\b|success|成功|✓|完成/i.test(line)) return 'log-ok';
+  if(/^\d{2}:\d{2}:\d{2}/.test(line)) return 'log-dim';
+  return '';
+}
+function appendLog(log, line){
+  const cls = logClass(line);
+  const safe = escHtml(line);
+  log.innerHTML += (cls ? `<span class="${cls}">${safe}</span>` : safe) + '\n';
+  log.scrollTop = log.scrollHeight;
+}
 async function runScript(){
   if(curRun && evtSrc){ evtSrc.close(); }
   const args = collectArgs(curSrc);
-  const log = $('#log'); log.textContent='';
+  const log = $('#log'); log.innerHTML='';
   $('#log-title').textContent = `运行日志 — ${curSrc.title}`;
   const r = await (await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({script:curSrc.id, args})})).json();
@@ -159,7 +173,7 @@ async function runScript(){
   $('#cmd-preview').textContent = '$ '+r.cmd;
   $('#btn-stop').disabled = false;
   evtSrc = new EventSource(`/api/logs/${curRun}`);
-  evtSrc.onmessage = e=>{ log.textContent += e.data+'\n'; log.scrollTop = log.scrollHeight; };
+  evtSrc.onmessage = e=>{ appendLog(log, e.data); };
   evtSrc.addEventListener('done', ()=>{ evtSrc.close(); $('#btn-stop').disabled = true; pollStatus(); });
   evtSrc.onerror = ()=>{ evtSrc.close(); $('#btn-stop').disabled = true; };
 }
